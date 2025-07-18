@@ -39,7 +39,7 @@ final class BWI_API_Client {
      */
     private function __construct() {
         $options = get_option( 'bwi_options' );
-        $this->access_token = defined('BWI_BSALE_ACCESS_TOKEN') ? BWI_BSALE_ACCESS_TOKEN : '';
+        $this->access_token = defined('BWI_ACCESS_TOKEN') ? BWI_ACCESS_TOKEN : '';
         
         // Usamos la URL actualizada y oficial de la API.
         $this->api_url = 'https://api.bsale.io/v1/';

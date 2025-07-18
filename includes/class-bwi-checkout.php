@@ -101,22 +101,24 @@ final class BWI_Checkout {
      * Guarda los datos de los campos personalizados como metadatos de la orden.
      * @param int $order_id
      */
-    public function save_custom_checkout_fields( $order_id ) {
+    public function save_custom_checkout_fields( $order, $data ) {
+        // CAMBIO: Usamos $order->update_meta_data() en lugar de update_post_meta()
         if ( ! empty( $_POST['bwi_document_type'] ) ) {
-            update_post_meta( $order_id, '_bwi_document_type', sanitize_text_field( $_POST['bwi_document_type'] ) );
+            $order->update_meta_data( '_bwi_document_type', sanitize_text_field( $_POST['bwi_document_type'] ) );
         }
         if ( 'factura' === $_POST['bwi_document_type'] && ! empty( $_POST['bwi_billing_rut'] ) ) {
-            update_post_meta( $order_id, '_bwi_billing_rut', sanitize_text_field( $_POST['bwi_billing_rut'] ) );
+            $order->update_meta_data( '_bwi_billing_rut', sanitize_text_field( $_POST['bwi_billing_rut'] ) );
         }
     }
 
     /**
-     * Muestra los datos personalizados en la página de edición de la orden en el panel de admin.
+     * Muestra los datos personalizados en la página de edición de la orden.
      * @param WC_Order $order
      */
     public function display_custom_fields_in_admin_order( $order ) {
-        $document_type = get_post_meta( $order->get_id(), '_bwi_document_type', true );
-        $billing_rut = get_post_meta( $order->get_id(), '_bwi_billing_rut', true );
+        // CAMBIO: Usamos $order->get_meta() en lugar de get_post_meta()
+        $document_type = $order->get_meta( '_bwi_document_type' );
+        $billing_rut = $order->get_meta( '_bwi_billing_rut' );
 
         echo '<div class="order_data_column">';
         echo '<h4>' . __( 'Datos de Facturación Bsale', 'bsale-woocommerce-integration' ) . '</h4>';

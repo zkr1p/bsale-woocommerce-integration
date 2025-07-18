@@ -3,7 +3,7 @@
  * Plugin Name:         Integración Bsale y WooCommerce
  * Plugin URI:          https://ovejavasca.cl
  * Description:         Sincroniza productos, stock, pedidos y facturación entre Bsale y WooCommerce basado en la documentación actualizada de la API de Bsale.
- * Version:             1.0.0
+ * Version:             1.1.0
  * Author:              WHYDOTCO
  * Author URI:          https://whydot.co
  * License:             GPLv2 or later
@@ -12,6 +12,7 @@
  * Domain Path:         /languages
  * WC requires at least: 3.0
  * WC tested up to:     8.0
+ * Declare: High-Performance-Order-Storage true
  */
 
 // Evitar el acceso directo al archivo
