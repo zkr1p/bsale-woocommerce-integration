@@ -82,6 +82,9 @@ final class BWI_Product_Sync {
 
     public function handle_manual_sync() {
         check_ajax_referer( 'bwi_manual_sync_nonce', 'security' );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( [ 'message' => 'No tienes permisos suficientes.' ], 403 );
+        }
         $this->schedule_full_sync();
         wp_send_json_success( [ 'message' => 'Sincronización masiva iniciada en segundo plano.' ] );
     }

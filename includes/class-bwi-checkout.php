@@ -33,7 +33,7 @@ final class BWI_Checkout {
         add_action( 'woocommerce_checkout_process', [ $this, 'validate_custom_fields' ] );
 
         // Hook para guardar los datos personalizados en la orden
-        add_action( 'woocommerce_checkout_update_order_meta', [ $this, 'save_custom_checkout_fields' ] );
+        add_action( 'woocommerce_checkout_create_order', [ $this, 'save_custom_checkout_fields' ], 10, 2 );
 
         // Hook para mostrar los campos en el detalle del pedido en el admin
         add_action( 'woocommerce_admin_order_data_after_billing_address', [ $this, 'display_custom_fields_in_admin_order' ], 10, 1 );
@@ -102,11 +102,11 @@ final class BWI_Checkout {
      * @param int $order_id
      */
     public function save_custom_checkout_fields( $order, $data ) {
-        // CAMBIO: Usamos $order->update_meta_data() en lugar de update_post_meta()
-        if ( ! empty( $_POST['bwi_document_type'] ) ) {
+        // MEJORA HPOS: Usamos $order->update_meta_data() en lugar de la función antigua update_post_meta()
+        if ( isset( $_POST['bwi_document_type'] ) ) {
             $order->update_meta_data( '_bwi_document_type', sanitize_text_field( $_POST['bwi_document_type'] ) );
         }
-        if ( 'factura' === $_POST['bwi_document_type'] && ! empty( $_POST['bwi_billing_rut'] ) ) {
+        if ( isset( $_POST['bwi_document_type'] ) && 'factura' === $_POST['bwi_document_type'] && ! empty( $_POST['bwi_billing_rut'] ) ) {
             $order->update_meta_data( '_bwi_billing_rut', sanitize_text_field( $_POST['bwi_billing_rut'] ) );
         }
     }
@@ -116,16 +116,20 @@ final class BWI_Checkout {
      * @param WC_Order $order
      */
     public function display_custom_fields_in_admin_order( $order ) {
-        // CAMBIO: Usamos $order->get_meta() en lugar de get_post_meta()
+        // MEJORA HPOS: Usamos $order->get_meta() en lugar de la función antigua get_post_meta()
         $document_type = $order->get_meta( '_bwi_document_type' );
         $billing_rut = $order->get_meta( '_bwi_billing_rut' );
 
+        if ( empty($document_type) ) {
+            return;
+        }
+
         echo '<div class="order_data_column">';
-        echo '<h4>' . __( 'Datos de Facturación Bsale', 'bsale-woocommerce-integration' ) . '</h4>';
-        echo '<p><strong>' . __( 'Tipo Documento:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( ucfirst( $document_type ) ) . '</p>';
+        echo '<h4>' . esc_html__( 'Datos de Facturación Bsale', 'bsale-woocommerce-integration' ) . '</h4>';
+        echo '<p><strong>' . esc_html__( 'Tipo Documento:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( ucfirst( $document_type ) ) . '</p>';
 
         if ( 'factura' === $document_type && ! empty( $billing_rut ) ) {
-            echo '<p><strong>' . __( 'RUT Empresa:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( $billing_rut ) . '</p>';
+            echo '<p><strong>' . esc_html__( 'RUT Empresa:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( $billing_rut ) . '</p>';
         }
         echo '</div>';
     }

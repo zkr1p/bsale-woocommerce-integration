@@ -85,27 +85,23 @@ final class BWI_Admin {
         register_setting( 'bwi_settings_group', 'bwi_options', [ $this, 'sanitize_options' ] );
 
         // --- SECCIÓN: Configuración de la API ---
-        add_settings_section( 'bwi_api_settings_section', 'Configuración de la API de Bsale', [ $this, 'section_callback' ], 'bwi_settings' );
+        add_settings_section( 'bwi_api_settings_section', 'Configuración de Credenciales (wp-config.php)', [ $this, 'section_callback' ], 'bwi_settings' );
         add_settings_field( 'bwi_access_token_info', 'Access Token', [ $this, 'render_access_token_info_field' ], 'bwi_settings', 'bwi_api_settings_section' );
+        add_settings_field( 'bwi_webhook_secret_info', 'Secreto del Webhook', [ $this, 'render_webhook_secret_info_field' ], 'bwi_settings', 'bwi_api_settings_section' );
 
         // --- SECCIÓN: Sincronización de Productos ---
         add_settings_section( 'bwi_sync_settings_section', 'Sincronización de Productos', [ $this, 'section_callback' ], 'bwi_settings' );
-        add_settings_field( 'bwi_enable_stock_sync', 'Activar Sincronización de Stock', [ $this, 'render_enable_stock_sync_field' ], 'bwi_settings', 'bwi_sync_settings_section' );
-        add_settings_field( 'bwi_office_id_stock', 'ID de Sucursal(es) para Stock', [ $this, 'render_office_id_stock_field' ], 'bwi_settings', 'bwi_sync_settings_section' );
-
+        add_settings_field( 'bwi_office_id_stock', 'Sucursal para Stock', [ $this, 'render_office_id_stock_field' ], 'bwi_settings', 'bwi_sync_settings_section' );
+        
         // --- SECCIÓN: Facturación ---
         add_settings_section( 'bwi_billing_settings_section', 'Facturación y Documentos', [ $this, 'section_callback' ], 'bwi_settings' );
         add_settings_field( 'bwi_enable_billing', 'Activar Creación de Documentos', [ $this, 'render_enable_billing_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
         add_settings_field( 'bwi_trigger_status', 'Estado para Generar Documento', [ $this, 'render_trigger_status_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
-        add_settings_field( 'bwi_default_document_type', 'ID Tipo Documento por Defecto (Boleta)', [ $this, 'render_default_document_type_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
-    
-        // Campos SII
         add_settings_field( 'bwi_boleta_codesii', 'Código SII para Boletas', [ $this, 'render_boleta_codesii_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
         add_settings_field( 'bwi_factura_codesii', 'Código SII para Facturas', [ $this, 'render_factura_codesii_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
-
-        // --- SECCIÓN WEBHOOKS ---
+    
+        // --- SECCIÓN: Webhooks ---
         add_settings_section( 'bwi_webhooks_section', 'Configuración de Webhooks', [ $this, 'section_callback' ], 'bwi_settings' );
-        add_settings_field( 'bwi_webhook_secret_info', 'Secreto del Webhook', [ $this, 'render_webhook_secret_info_field' ], 'bwi_settings', 'bwi_webhooks_section' );
         add_settings_field( 'bwi_webhook_url', 'URL para Webhooks', [ $this, 'render_webhook_url_field' ], 'bwi_settings', 'bwi_webhooks_section' );
 
         // --- SECCIÓN: Acciones Manuales ---
@@ -166,8 +162,9 @@ final class BWI_Admin {
             return;
         }
         $webhook_url = add_query_arg( 'token', $secret, get_rest_url( null, 'bwi/v1/webhook' ) );
-        echo '<input type="text" value="' . esc_url( $webhook_url ) . '" readonly class="large-text">';
-        echo '<p class="description">Copia esta URL y pégala en la configuración de webhooks de Bsale.</p>';}
+        echo '<input type="text" value="' . esc_url( $webhook_url ) . '" readonly class="large-text code">';
+        echo '<p class="description">Copia esta URL y pégala en la configuración de webhooks de Bsale.</p>';
+    }
     public function render_access_token_field() { 
         $options = get_option( 'bwi_options' );
         $value = isset( $options['access_token'] ) ? $options['access_token'] : '';
@@ -182,20 +179,15 @@ final class BWI_Admin {
         $options = get_option('bwi_options');
         $selected_office_id = isset($options['office_id_stock']) ? $options['office_id_stock'] : '';
 
-        // --- MEJORA DE RENDIMIENTO CON TRANSIENTS ---
-        
-        // 1. Intentar obtener la lista de sucursales desde la caché de WordPress.
+        // MEJORA DE RENDIMIENTO CON TRANSIENTS
         $offices = get_transient('bwi_offices_list');
-
-        // 2. Si no está en la caché (o ha expirado), pedirla a la API.
         if ( false === $offices ) {
             $api_client = BWI_API_Client::get_instance();
             $response = $api_client->get('offices.json');
             
-            $offices = []; // Por defecto, un array vacío si falla la API.
+            $offices = [];
             if ( !is_wp_error($response) && !empty($response->items) ) {
                 $offices = $response->items;
-                // 3. Guardar la respuesta en la caché por 12 horas.
                 set_transient( 'bwi_offices_list', $offices, 12 * HOUR_IN_SECONDS );
             }
         }
@@ -212,10 +204,11 @@ final class BWI_Admin {
                 );
             }
         } else {
-            echo '<option value="">No se pudieron cargar las sucursales desde Bsale.</option>';
+            echo '<option value="">No se pudieron cargar las sucursales. Verifique el Access Token.</option>';
         }
         echo '</select>';
-        echo '<p class="description">Seleccione la sucursal de Bsale. La lista se actualiza desde la API cada 12 horas.</p>';}
+        echo '<p class="description">Seleccione la sucursal de Bsale. La lista se actualiza desde la API cada 12 horas.</p>';
+    }
     public function render_enable_billing_field() {
         $options = get_option( 'bwi_options' );
         $checked = isset( $options['enable_billing'] ) ? checked( 1, $options['enable_billing'], false ) : '';
@@ -268,28 +261,17 @@ final class BWI_Admin {
         echo '<input type="number" name="bwi_options[factura_codesii]" value="' . esc_attr( $value ) . '" class="small-text">';
         echo '<p class="description">Introduce el código SII para Facturas Electrónicas. Generalmente es <strong>33</strong>.</p>'; }
     
-    public function sanitize_options( $input ) { 
+    public function sanitize_options( $input ) {
         $new_input = [];
-        if ( isset( $input['enable_stock_sync'] ) ) {
-            $new_input['enable_stock_sync'] = absint( $input['enable_stock_sync'] );
-        }
-        if ( isset( $input['office_id_stock'] ) ) {
-            $new_input['office_id_stock'] = sanitize_text_field( $input['office_id_stock'] );
-        }
-        if ( isset( $input['enable_billing'] ) ) {
-            $new_input['enable_billing'] = absint( $input['enable_billing'] );
-        }
-        if ( isset( $input['trigger_status'] ) ) {
-            $new_input['trigger_status'] = sanitize_text_field( $input['trigger_status'] );
-        }
-        if ( isset( $input['default_document_type'] ) ) {
-            $new_input['default_document_type'] = sanitize_text_field( $input['default_document_type'] );
-        }
+        // Las credenciales ya no se guardan aquí.
+        if ( isset( $input['office_id_stock'] ) ) $new_input['office_id_stock'] = absint( $input['office_id_stock'] );
+        if ( isset( $input['enable_billing'] ) ) $new_input['enable_billing'] = absint( $input['enable_billing'] );
+        if ( isset( $input['trigger_status'] ) ) $new_input['trigger_status'] = sanitize_text_field( $input['trigger_status'] );
         if ( isset( $input['boleta_codesii'] ) ) $new_input['boleta_codesii'] = absint( $input['boleta_codesii'] );
         if ( isset( $input['factura_codesii'] ) ) $new_input['factura_codesii'] = absint( $input['factura_codesii'] );
-
-        return $new_input; }
-    
+        
+        return $new_input;
+    }
     /**
      * Encola el script JS para la página de administración.
      */

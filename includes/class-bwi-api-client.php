@@ -80,8 +80,8 @@ final class BWI_API_Client {
             'timeout' => 30, // Aumentamos el timeout a 30 segundos para operaciones largas.
         ];
 
-        if ( ! empty( $body ) ) {
-            $args['body'] = json_encode( $body );
+        if ( ! empty( $body ) && in_array( strtoupper($method), ['POST', 'PUT'] ) ) {
+            $args['body'] = wp_json_encode( $body );
         }
 
         // Usamos la API HTTP de WordPress para realizar la solicitud.
@@ -99,8 +99,8 @@ final class BWI_API_Client {
         // Manejo de errores devueltos por la API de Bsale (ej. 4xx, 5xx).
         if ( $response_code >= 400 ) {
             $error_message = 'Error desconocido de la API de Bsale.';
-            if ( isset( $decoded_body->error->message ) ) {
-                $error_message = $decoded_body->error->message;
+            if ( isset( $decoded_body->error ) ) {
+                 $error_message = is_string($decoded_body->error) ? $decoded_body->error : 'La API devolvió un error inesperado.';
             }
             return new WP_Error( 'bwi_api_error', $error_message, [ 'status' => $response_code ] );
         }
