@@ -1,14 +1,14 @@
 <?php
 /**
- * Plugin Name:         Integración Bsale y WooCommerce
+ * Plugin Name:         Integración Bsale y WooCommerce - LOV
  * Plugin URI:          https://ovejavasca.cl
  * Description:         Sincroniza productos, stock, pedidos y facturación entre Bsale y WooCommerce basado en la documentación actualizada de la API de Bsale.
- * Version:             2.0.0
+ * Version:             2.3.0
  * Author:              WHYDOTCO
  * Author URI:          https://whydot.co
  * License:             GPLv2 or later
  * License URI:         https://www.gnu.org/licenses/gpl-2.0.html
- * Text Domain:         bsale-woocommerce-integration
+ * Text Domain:         bsale-woocommerce-integration-lov
  * Domain Path:         /languages
  * WC requires at least: 3.0
  * WC tested up to:     8.0
@@ -25,7 +25,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 // Definir constantes del plugin para rutas y URLs
 define( 'BWI_PLUGIN_PATH', plugin_dir_path( __FILE__ ) );
 define( 'BWI_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
-define( 'BWI_API_URL', 'https://api.bsale.io/v1/' ); // URL base de la API de Bsale
 
 /**
  * Clase principal de la Integración.
@@ -44,19 +43,35 @@ final class Bsale_WooCommerce_Integration {
      * Es privado para asegurar que solo exista una instancia (patrón Singleton).
      */
     private function __construct() {
-        $this->load_dependencies();
-        $this->init_hooks();
+        // MEJORA CRÍTICA: No cargar nada aquí. Solo enganchar la inicialización al hook correcto.
+        add_action( 'plugins_loaded', [ $this, 'init_plugin' ] );
     }
 
     /**
      * Método para obtener la instancia única de la clase.
-     * @return Bsale_WooCommerce_Integration
      */
     public static function get_instance() {
         if ( ! isset( self::$instance ) ) {
             self::$instance = new self();
         }
         return self::$instance;
+    }
+
+    /**
+     * Inicializa el plugin. Se ejecuta solo cuando todos los plugins están cargados.
+     */
+    public function init_plugin() {
+        // 1. Verificar si WooCommerce está activo.
+        if ( ! class_exists( 'WooCommerce' ) ) {
+            add_action( 'admin_notices', [ $this, 'notice_woocommerce_not_active' ] );
+            return;
+        }
+
+        // 2. Ahora que sabemos que WC está activo, cargamos nuestras dependencias.
+        $this->load_dependencies();
+
+        // 3. Inicializamos nuestras clases.
+        $this->init_classes();
     }
 
     /**
@@ -85,7 +100,7 @@ final class Bsale_WooCommerce_Integration {
     /**
      * Inicializa los hooks de WordPress y las clases del plugin.
      */
-    private function init_hooks() {
+    private function init_classes() {
         // Inicializar las clases principales
         BWI_Admin::get_instance();
         BWI_Product_Sync::get_instance();
