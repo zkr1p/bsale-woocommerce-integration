@@ -66,18 +66,18 @@ final class BWI_API_Client {
      */
     private function request( $method, $endpoint, $body = [] ) {
         if ( empty( $this->access_token ) ) {
-            return new WP_Error( 'bwi_api_error', 'El Access Token de Bsale no está configurado.' );
+            return new WP_Error( 'bwi_api_error', 'El Access Token de Bsale no está configurado en wp-config.php (BWI_ACCESS_TOKEN).' );
         }
 
-        $request_url = $this->api_url . $endpoint;
+        $request_url = $this->api_url . ltrim($endpoint, '/');
 
         $args = [
-            'method'  => $method,
+            'method'  => strtoupper($method),
             'headers' => [
                 'Content-Type' => 'application/json',
                 'access_token' => $this->access_token,
             ],
-            'timeout' => 30, // Aumentamos el timeout a 30 segundos para operaciones largas.
+            'timeout' => 30,
         ];
 
         if ( ! empty( $body ) && in_array( strtoupper($method), ['POST', 'PUT'] ) ) {
@@ -102,7 +102,7 @@ final class BWI_API_Client {
             if ( isset( $decoded_body->error ) ) {
                  $error_message = is_string($decoded_body->error) ? $decoded_body->error : 'La API devolvió un error inesperado.';
             }
-            return new WP_Error( 'bwi_api_error', $error_message, [ 'status' => $response_code ] );
+            return new WP_Error( 'bwi_api_error', "Error {$response_code}: {$error_message}", [ 'status' => $response_code ] );
         }
 
         return $decoded_body;
@@ -114,6 +114,13 @@ final class BWI_API_Client {
      * @param array $params Parámetros de consulta (ej. limit, offset).
      * @return mixed|WP_Error
      */
+    public function get( $endpoint, $params = [] ) {
+        if ( ! empty( $params ) ) {
+            $endpoint .= '?' . http_build_query( $params );
+        }
+        return $this->request( 'GET', $endpoint );
+    }
+    /*
     public function get_products( $params = [] ) {
         $endpoint = 'products.json';
         if ( ! empty( $params ) ) {
@@ -121,6 +128,7 @@ final class BWI_API_Client {
         }
         return $this->request( 'GET', $endpoint );
     }
+        */
 
     /**
      * Método público para crear un documento en Bsale.
@@ -150,5 +158,7 @@ final class BWI_API_Client {
     
     // --- Aquí se pueden añadir más métodos públicos para otros endpoints ---
     // ej. get_clients(), get_document_types(), etc.
-
+    public function post( $endpoint, $data ) {
+        return $this->request( 'POST', $endpoint, $data );
+    }
 }
