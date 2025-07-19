@@ -129,16 +129,22 @@ final class BWI_Order_Sync {
 
         if ( 'factura' === $document_type ) {
             $code_sii = ! empty( $this->options['factura_codesii'] ) ? absint($this->options['factura_codesii']) : 33;
+            $client_rut = ! empty( $billing_rut ) ? $billing_rut : '';
+            if ( empty($client_rut) ) {
+                return new WP_Error( 'missing_rut_for_invoice', 'Se intentó crear una factura sin un RUT de cliente.' );
+            }
         } else {
             $code_sii = ! empty( $this->options['boleta_codesii'] ) ? absint($this->options['boleta_codesii']) : 39;
+            // CORRECCIÓN DE BUG: Usar RUT genérico para boletas.
+            $client_rut = '1-9';
         }
         
         $client_data = [
-            'code'           => ( 'factura' === $document_type && !empty($billing_rut) ) ? $billing_rut : '1-9',
+            'code'           => $client_rut,
             'city'           => $order->get_billing_city(),
             'company'        => $order->get_billing_company() ?: $order->get_formatted_billing_full_name(),
             'municipality'   => $order->get_billing_state(),
-            'activity'       => ( 'factura' === $document_type ) ? 'Giro de la empresa' : 'Consumidor Final', // Se puede mejorar con un campo personalizado
+            'activity'       => ( 'factura' === $document_type ) ? 'Giro de la empresa' : 'Consumidor Final',
             'address'        => $order->get_billing_address_1(),
             'email'          => $order->get_billing_email(),
             'phone'          => $order->get_billing_phone(),
@@ -161,10 +167,20 @@ final class BWI_Order_Sync {
             ];
         }
 
+        // Añadir el envío como una línea de detalle si existe.
+        if ( $order->get_shipping_total() > 0 ) {
+            $details[] = [
+                'comment' => 'Costo de Envío: ' . $order->get_shipping_method(),
+                'quantity' => 1,
+                'netUnitValue' => wc_get_price_excluding_tax( $order, ['price' => $order->get_shipping_total()] ),
+            ];
+        }
+
         $payload = [
+            'salesId'      => $order->get_order_key(), // Idempotencia para evitar documentos duplicados
             'codeSii'      => $code_sii,
-            'officeId'     => 1, // Esto debería ser configurable en el panel de admin.
-            'priceListId'  => 1, // Esto debería ser configurable en el panel de admin.
+            'officeId'     => ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 1,
+            'priceListId'  => 1, // Se puede hacer configurable en el futuro.
             'emissionDate' => time(),
             'client'       => $client_data,
             'details'      => $details,

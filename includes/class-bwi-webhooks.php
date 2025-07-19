@@ -70,14 +70,14 @@ final class BWI_Webhooks {
         $payload = $request->get_json_params();
         $logger->info( 'Webhook de Bsale recibido y validado: ' . wp_json_encode( $payload ), [ 'source' => 'bwi-webhooks' ] );
 
-        /* if ( ! isset( $payload['topic'] ) || ! isset( $payload['resource'] ) ) {
+        if ( ! isset( $payload['topic'] ) ) {
             return new WP_REST_Response( [ 'status' => 'error', 'message' => 'Payload inválido.' ], 400 );
-        } */
+        }
 
-        // Delegar el procesamiento a una acción asíncrona para no bloquear la respuesta.
+        // MEJORA DE RENDIMIENTO: Delegar el procesamiento a una acción asíncrona.
         as_enqueue_async_action( 'bwi_process_webhook_payload', [ 'payload' => $payload ], 'bwi-webhooks' );
 
-        return new WP_REST_Response( [ 'status' => 'success', 'message' => 'Webhook procesado.' ], 200 );
+        return new WP_REST_Response( [ 'status' => 'success', 'message' => 'Webhook recibido y encolado para procesamiento.' ], 200 );
     }
 
     /*

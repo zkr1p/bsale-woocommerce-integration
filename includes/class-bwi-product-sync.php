@@ -41,13 +41,13 @@ final class BWI_Product_Sync {
         $this->options = get_option( 'bwi_options' );
 
         // Hooks para la sincronización
-        add_action( 'bwi_cron_sync_products', [ $this, 'sync_all_products' ] );
+        add_action( 'bwi_cron_sync_products', [ $this, 'schedule_full_sync' ] );
         add_action( 'wp_ajax_bwi_manual_sync', [ $this, 'handle_manual_sync' ] );
+        
         // Hooks para las tareas en segundo plano
         add_action( 'bwi_sync_products_batch', [ $this, 'process_sync_batch' ], 10, 1 );
         add_action( 'bwi_sync_single_variant', [ $this, 'update_or_create_product_from_variant' ], 10, 2 );
 
-        // Registrar el cron si no existe
         if ( ! wp_next_scheduled( 'bwi_cron_sync_products' ) ) {
             wp_schedule_event( time(), 'hourly', 'bwi_cron_sync_products' );
         }
@@ -82,21 +82,26 @@ final class BWI_Product_Sync {
 
     public function handle_manual_sync() {
         check_ajax_referer( 'bwi_manual_sync_nonce', 'security' );
+
+        // MEJORA DE SEGURIDAD: Verificar que solo los administradores puedan ejecutar esta acción.
         if ( ! current_user_can( 'manage_options' ) ) {
-            wp_send_json_error( [ 'message' => 'No tienes permisos suficientes.' ], 403 );
+            wp_send_json_error( [ 'message' => 'No tienes permisos suficientes para realizar esta acción.' ], 403 );
         }
+
         $this->schedule_full_sync();
-        wp_send_json_success( [ 'message' => 'Sincronización masiva iniciada en segundo plano.' ] );
+        wp_send_json_success( [ 'message' => 'Sincronización masiva iniciada en segundo plano. Los productos se actualizarán progresivamente.' ] );
     }
 
     public function schedule_full_sync() {
         $logger = wc_get_logger();
         $logger->info( 'Iniciando la programación de sincronización masiva de productos.', [ 'source' => 'bwi-sync' ] );
+        
+        // Iniciar con el primer lote de productos.
         as_enqueue_async_action( 'bwi_sync_products_batch', [ 'offset' => 0 ], 'bwi-sync' );
     }
 
     public function process_sync_batch( $offset = 0 ) {
-        $limit = 50;
+        $limit = 50; // Máximo permitido por la API de Bsale.
         $logger = wc_get_logger();
         $logger->info( "Procesando lote de productos. Offset: {$offset}", [ 'source' => 'bwi-sync' ] );
 
@@ -104,18 +109,20 @@ final class BWI_Product_Sync {
         $response = $this->api_client->get( 'products.json', $params );
 
         if ( is_wp_error( $response ) || empty( $response->items ) ) {
-            $logger->info( 'Fin de la sincronización masiva o error en la API.', [ 'source' => 'bwi-sync' ] );
+            $logger->info( 'Fin de la sincronización masiva o error en la API. No se programarán más lotes.', [ 'source' => 'bwi-sync' ] );
             return;
         }
 
         foreach ( $response->items as $bsale_product ) {
             if ( ! empty( $bsale_product->variants->items ) ) {
                 foreach ( $bsale_product->variants->items as $variant ) {
+                    // Encolar una tarea individual para cada variante.
                     as_enqueue_async_action( 'bwi_sync_single_variant', [ 'variant_data' => $variant, 'product_data' => $bsale_product ], 'bwi-sync' );
                 }
             }
         }
 
+        // Programar el siguiente lote para que se procese.
         as_enqueue_async_action( 'bwi_sync_products_batch', [ 'offset' => $offset + $limit ], 'bwi-sync' );
     }
     /**
@@ -173,7 +180,44 @@ final class BWI_Product_Sync {
      * @param object $variant_data Datos de la variante de Bsale.
      * @param object $product_data Datos del producto padre de Bsale.
      */
-    private function update_or_create_product( $variant_data, $product_data ) {
+    public function update_or_create_product_from_variant( $variant_data, $product_data ) {
+        $logger = wc_get_logger();
+        $sku = $variant_data->code;
+
+        if ( empty( $sku ) ) {
+            $logger->warning( 'Variante de Bsale sin SKU. Producto: ' . $product_data->name, [ 'source' => 'bwi-sync' ] );
+            return;
+        }
+
+        $product_id = wc_get_product_id_by_sku( $sku );
+        $product_name = $product_data->name . ( count( (array) $product_data->variants->items ) > 1 ? ' - ' . $variant_data->description : '' );
+
+        try {
+            if ( $product_id ) {
+                $product = wc_get_product( $product_id );
+                $product->set_name( $product_name );
+            } else {
+                $product = new WC_Product_Simple();
+                $product->set_name( $product_name );
+                $product->set_sku( $sku );
+                $product->set_status( 'draft' );
+            }
+
+            if ( ! empty( $this->options['enable_stock_sync'] ) ) {
+                $stock = $this->get_stock_for_variant( $variant_data->id );
+                if ( ! is_wp_error( $stock ) ) {
+                    $product->set_manage_stock( true );
+                    $product->set_stock_quantity( $stock );
+                }
+            }
+            
+            $product->save();
+
+        } catch ( Exception $e ) {
+            $logger->error( 'Error al guardar producto ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-sync' ] );
+        }
+    }
+    /* private function update_or_create_product( $variant_data, $product_data ) {
         $logger = wc_get_logger();
         $sku = $variant_data->code;
 
@@ -219,13 +263,32 @@ final class BWI_Product_Sync {
             $logger->error( 'Error al guardar producto ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-sync' ] );
         }
     }
-
+    */
     /**
      * Obtiene y suma el stock de una variante desde todas las sucursales configuradas.
      *
      * @param int $variant_id El ID de la variante de Bsale.
      * @return int|WP_Error El stock total o un error.
      */
+    private function get_stock_for_variant( $variant_id ) {
+        $office_id = ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 0;
+        if ( empty( $office_id ) ) {
+            return 0; // Si no hay sucursal configurada, el stock es 0.
+        }
+
+        $params = [
+            'variantid' => $variant_id,
+            'officeid'  => $office_id
+        ];
+        $response = $this->api_client->get( 'stocks.json', $params );
+
+        if ( ! is_wp_error( $response ) && ! empty( $response->items ) ) {
+            return $response->items[0]->quantityAvailable;
+        }
+
+        return 0;
+    }
+    /*
     private function get_total_stock_for_variant( $variant_id ) {
         $office_ids_str = ! empty( $this->options['office_id_stock'] ) ? $this->options['office_id_stock'] : '';
         if ( empty( $office_ids_str ) ) {
@@ -250,6 +313,7 @@ final class BWI_Product_Sync {
 
         return $total_stock;
     }
+        */
     /**
      * Actualiza el stock de un único producto, típicamente gatillado por un webhook.
      *
@@ -296,6 +360,7 @@ final class BWI_Product_Sync {
         }
     }
     */
+    /*
     public function update_stock_from_webhook( $payload ) {
         $logger = wc_get_logger();
 
@@ -311,6 +376,41 @@ final class BWI_Product_Sync {
 
         if ( is_wp_error( $stock_details ) || ! isset( $stock_details->variant->code ) ) {
             $logger->error( 'No se pudieron obtener los detalles del stock desde el webhook.', [ 'source' => 'bwi-webhooks', 'payload' => $payload ] );
+            return;
+        }
+
+        $sku = sanitize_text_field( $stock_details->variant->code );
+        $quantity = intval( $stock_details->quantityAvailable );
+
+        $product_id = wc_get_product_id_by_sku( $sku );
+
+        if ( $product_id ) {
+            try {
+                $product = wc_get_product( $product_id );
+                $product->set_stock_quantity( $quantity );
+                $product->save();
+                $logger->info( "Stock actualizado por webhook para SKU {$sku}. Nueva cantidad: {$quantity}", [ 'source' => 'bwi-webhooks' ] );
+            } catch ( Exception $e ) {
+                $logger->error( 'Error al actualizar stock por webhook para SKU ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-webhooks' ] );
+            }
+        } else {
+            $logger->info( "Webhook de stock recibido para SKU {$sku}, pero no se encontró el producto en WooCommerce.", [ 'source' => 'bwi-webhooks' ] );
+        }
+    }*/
+        
+    public function update_stock_from_webhook( $payload ) {
+        $logger = wc_get_logger();
+
+        if ( ! isset( $payload['resource'] ) ) {
+            $logger->warning( 'Payload de webhook de stock sin la clave "resource".', [ 'source' => 'bwi-webhooks' ] );
+            return;
+        }
+
+        // El webhook notifica un recurso de la API. Hacemos una llamada GET para obtener los detalles completos.
+        $stock_details = $this->api_client->get( $payload['resource'] );
+
+        if ( is_wp_error( $stock_details ) || ! isset( $stock_details->variant->code ) ) {
+            $logger->error( 'No se pudieron obtener los detalles del stock desde el webhook.', [ 'source' => 'bwi-webhooks', 'resource' => $payload['resource'] ] );
             return;
         }
 
