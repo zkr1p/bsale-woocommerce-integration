@@ -39,7 +39,7 @@ final class BWI_Checkout {
         add_action( 'woocommerce_admin_order_data_after_billing_address', [ $this, 'display_custom_fields_in_admin_order' ], 10, 1 );
 
         // Hook para añadir el script JS al frontend
-        add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_checkout_scripts' ] );
+        add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_checkout_assets' ] );
     }
 
     /**
