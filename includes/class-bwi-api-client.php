@@ -57,7 +57,7 @@ final class BWI_API_Client {
     }
 
     /**
-     * Realiza una solicitud a la API de Bsale.
+     * Método central y privado que maneja toda la comunicación.
      *
      * @param string $method   El método HTTP (GET, POST, PUT, DELETE).
      * @param string $endpoint El endpoint de la API al que se llama (ej. 'documents.json').
@@ -120,15 +120,6 @@ final class BWI_API_Client {
         }
         return $this->request( 'GET', $endpoint );
     }
-    /*
-    public function get_products( $params = [] ) {
-        $endpoint = 'products.json';
-        if ( ! empty( $params ) ) {
-            $endpoint .= '?' . http_build_query( $params );
-        }
-        return $this->request( 'GET', $endpoint );
-    }
-        */
 
     /**
      * Método público para crear un documento en Bsale.
@@ -160,5 +151,14 @@ final class BWI_API_Client {
     // ej. get_clients(), get_document_types(), etc.
     public function post( $endpoint, $data ) {
         return $this->request( 'POST', $endpoint, $data );
+    }
+    /**
+     * NUEVO: Envía una solicitud para crear una devolución (Nota de Crédito).
+     *
+     * @param array $data El payload para la devolución.
+     * @return mixed|WP_Error
+     */
+    public function create_return( $data ) {
+        return $this->post( 'returns.json', $data );
     }
 }

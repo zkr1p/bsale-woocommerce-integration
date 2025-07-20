@@ -57,30 +57,47 @@ final class BWI_Checkout {
      * Añade los campos personalizados al formulario de checkout.
      */
     public function add_custom_checkout_fields( $checkout ) {
-        echo '<div id="bwi-billing-options"><h3>' . __( 'Documento Tributario', 'bsale-woocommerce-integration' ) . '</h3>';
+        echo '<div id="bwi-billing-options"><h3>' . esc_html__( 'Documento Tributario', 'bsale-woocommerce-integration' ) . '</h3>';
 
         woocommerce_form_field( 'bwi_document_type', [
             'type'    => 'radio',
             'class'   => [ 'form-row-wide' ],
-            'label'   => __( 'Tipo de Documento', 'bsale-woocommerce-integration' ),
+            'label'   => esc_html__( 'Tipo de Documento', 'bsale-woocommerce-integration' ),
             'options' => [
-                'boleta'  => __( 'Boleta', 'bsale-woocommerce-integration' ),
-                'factura' => __( 'Factura', 'bsale-woocommerce-integration' ),
+                'boleta'  => esc_html__( 'Boleta', 'bsale-woocommerce-integration' ),
+                'factura' => esc_html__( 'Factura', 'bsale-woocommerce-integration' ),
             ],
             'default' => 'boleta',
         ], $checkout->get_value( 'bwi_document_type' ) );
 
         echo '<div id="bwi-factura-fields" style="display:none;">';
 
+        // Campo para Razón Social
+        woocommerce_form_field( 'bwi_billing_company_name', [
+            'type'        => 'text',
+            'class'       => [ 'form-row-wide' ],
+            'label'       => esc_html__( 'Razón Social', 'bsale-woocommerce-integration' ),
+            'placeholder' => esc_html__( 'Nombre legal de la empresa', 'bsale-woocommerce-integration' ),
+            'required'    => true,
+        ], $checkout->get_value( 'bwi_billing_company_name' ) );
+
+        // Campo para RUT
         woocommerce_form_field( 'bwi_billing_rut', [
             'type'        => 'text',
             'class'       => [ 'form-row-wide' ],
-            'label'       => __( 'RUT Empresa', 'bsale-woocommerce-integration' ),
-            'placeholder' => __( 'Ej: 76.123.456-7', 'bsale-woocommerce-integration' ),
+            'label'       => esc_html__( 'RUT Empresa', 'bsale-woocommerce-integration' ),
+            'placeholder' => esc_html__( 'Ej: 76.123.456-7', 'bsale-woocommerce-integration' ),
             'required'    => true,
         ], $checkout->get_value( 'bwi_billing_rut' ) );
-
-        // Aquí se podrían añadir más campos como Razón Social, Giro, etc.
+        
+        // Campo para Giro
+        woocommerce_form_field( 'bwi_billing_activity', [
+            'type'        => 'text',
+            'class'       => [ 'form-row-wide' ],
+            'label'       => esc_html__( 'Giro', 'bsale-woocommerce-integration' ),
+            'placeholder' => esc_html__( 'Ej: Servicios Informáticos', 'bsale-woocommerce-integration' ),
+            'required'    => true,
+        ], $checkout->get_value( 'bwi_billing_activity' ) );
 
         echo '</div></div>';
     }
@@ -89,11 +106,16 @@ final class BWI_Checkout {
      * Valida los campos personalizados cuando se envía el formulario.
      */
     public function validate_custom_fields() {
-        if ( ! empty( $_POST['bwi_document_type'] ) && 'factura' === $_POST['bwi_document_type'] ) {
+        if ( isset($_POST['bwi_document_type']) && 'factura' === $_POST['bwi_document_type'] ) {
+            if ( empty( $_POST['bwi_billing_company_name'] ) ) {
+                wc_add_notice( __( 'Por favor, introduce la Razón Social para la factura.', 'bsale-woocommerce-integration' ), 'error' );
+            }
             if ( empty( $_POST['bwi_billing_rut'] ) ) {
                 wc_add_notice( __( 'Por favor, introduce el RUT de la empresa para la factura.', 'bsale-woocommerce-integration' ), 'error' );
             }
-            // Aquí se podría añadir una validación más robusta del formato del RUT.
+            if ( empty( $_POST['bwi_billing_activity'] ) ) {
+                wc_add_notice( __( 'Por favor, introduce el Giro para la factura.', 'bsale-woocommerce-integration' ), 'error' );
+            }
         }
     }
 
@@ -102,12 +124,19 @@ final class BWI_Checkout {
      * @param int $order_id
      */
     public function save_custom_checkout_fields( $order, $data ) {
-        // MEJORA HPOS: Usamos $order->update_meta_data() en lugar de la función antigua update_post_meta()
         if ( isset( $_POST['bwi_document_type'] ) ) {
             $order->update_meta_data( '_bwi_document_type', sanitize_text_field( $_POST['bwi_document_type'] ) );
         }
-        if ( isset( $_POST['bwi_document_type'] ) && 'factura' === $_POST['bwi_document_type'] && ! empty( $_POST['bwi_billing_rut'] ) ) {
-            $order->update_meta_data( '_bwi_billing_rut', sanitize_text_field( $_POST['bwi_billing_rut'] ) );
+        if ( isset( $_POST['bwi_document_type'] ) && 'factura' === $_POST['bwi_document_type'] ) {
+            if ( ! empty( $_POST['bwi_billing_company_name'] ) ) {
+                $order->update_meta_data( '_bwi_billing_company_name', sanitize_text_field( $_POST['bwi_billing_company_name'] ) );
+            }
+            if ( ! empty( $_POST['bwi_billing_rut'] ) ) {
+                $order->update_meta_data( '_bwi_billing_rut', sanitize_text_field( $_POST['bwi_billing_rut'] ) );
+            }
+            if ( ! empty( $_POST['bwi_billing_activity'] ) ) {
+                $order->update_meta_data( '_bwi_billing_activity', sanitize_text_field( $_POST['bwi_billing_activity'] ) );
+            }
         }
     }
 
@@ -116,10 +145,7 @@ final class BWI_Checkout {
      * @param WC_Order $order
      */
     public function display_custom_fields_in_admin_order( $order ) {
-        // MEJORA HPOS: Usamos $order->get_meta() en lugar de la función antigua get_post_meta()
         $document_type = $order->get_meta( '_bwi_document_type' );
-        $billing_rut = $order->get_meta( '_bwi_billing_rut' );
-
         if ( empty($document_type) ) {
             return;
         }
@@ -128,8 +154,10 @@ final class BWI_Checkout {
         echo '<h4>' . esc_html__( 'Datos de Facturación Bsale', 'bsale-woocommerce-integration' ) . '</h4>';
         echo '<p><strong>' . esc_html__( 'Tipo Documento:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( ucfirst( $document_type ) ) . '</p>';
 
-        if ( 'factura' === $document_type && ! empty( $billing_rut ) ) {
-            echo '<p><strong>' . esc_html__( 'RUT Empresa:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( $billing_rut ) . '</p>';
+        if ( 'factura' === $document_type ) {
+            echo '<p><strong>' . esc_html__( 'Razón Social:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( $order->get_meta( '_bwi_billing_company_name' ) ) . '</p>';
+            echo '<p><strong>' . esc_html__( 'RUT Empresa:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( $order->get_meta( '_bwi_billing_rut' ) ) . '</p>';
+            echo '<p><strong>' . esc_html__( 'Giro:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( $order->get_meta( '_bwi_billing_activity' ) ) . '</p>';
         }
         echo '</div>';
     }
@@ -138,13 +166,12 @@ final class BWI_Checkout {
      * Encola el script JS para el checkout.
      */
     public function enqueue_checkout_scripts() {
-        // Solo cargar en la página de checkout
         if ( is_checkout() ) {
             wp_enqueue_script(
                 'bwi-checkout-script',
                 BWI_PLUGIN_URL . 'js/bwi-checkout.js',
                 [ 'jquery' ],
-                '1.0.0',
+                '2.6.0', // Incrementa la versión del script
                 true
             );
         }

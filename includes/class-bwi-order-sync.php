@@ -32,6 +32,10 @@ final class BWI_Order_Sync {
         
         // Hook para la acción asíncrona que crea el documento en segundo plano.
         add_action( 'bwi_create_document_for_order', [ $this, 'process_document_creation' ], 10, 1 );
+        // Hooks para la creación de Notas de Crédito.
+        add_action( 'woocommerce_order_status_refunded', [ $this, 'trigger_credit_note_creation' ], 10, 1 );
+        add_action( 'woocommerce_order_status_cancelled', [ $this, 'trigger_credit_note_creation' ], 10, 1 );
+        add_action( 'bwi_create_credit_note_for_order', [ $this, 'process_credit_note_creation' ], 10, 1 );
     }
 
     /**
@@ -187,5 +191,58 @@ final class BWI_Order_Sync {
         ];
 
         return $payload;
+    }
+
+    /**
+     * Procesa la creación de la Nota de Crédito.
+     * @param int $order_id
+     */
+    public function process_credit_note_creation( $order_id ) {
+        $order = wc_get_order( $order_id );
+        if ( ! $order ) return;
+
+        $bsale_document_id = $order->get_meta( '_bwi_document_id' );
+        if ( ! $bsale_document_id ) return;
+
+        $api_client = BWI_API_Client::get_instance();
+
+        // Para crear una devolución, necesitamos los IDs de los detalles del documento original.
+        $original_document = $api_client->get( "documents/{$bsale_document_id}.json", [ 'expand' => '[details]' ] );
+
+        if ( is_wp_error( $original_document ) || empty( $original_document->details->items ) ) {
+            $order->add_order_note( '<strong>Error:</strong> No se pudo obtener el detalle del documento original de Bsale para crear la Nota de Crédito.' );
+            return;
+        }
+        
+        $payload = [
+            'documentId' => (int) $bsale_document_id,
+            'officeId'   => ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 1,
+            'motive'     => 'Anulación de venta desde WooCommerce. Pedido #' . $order->get_order_number(),
+            'details'    => []
+        ];
+
+        // Mapear los productos reembolsados a los detalles de la devolución.
+        // En este ejemplo, asumimos una devolución total.
+        foreach ( $original_document->details->items as $detail_item ) {
+            $payload['details'][] = [
+                'detailId' => $detail_item->id,
+                'quantity' => $detail_item->quantity
+            ];
+        }
+
+        $response = $api_client->create_return( $payload );
+
+        if ( is_wp_error( $response ) ) {
+            $order->add_order_note( '<strong>Error al crear Nota de Crédito en Bsale:</strong> ' . $response->get_error_message() );
+        } else if ( isset( $response->id ) ) {
+            $order->update_meta_data( '_bwi_return_id', $response->id );
+            // La respuesta de la API de devoluciones puede variar, ajusta según sea necesario.
+            $note = 'Nota de Crédito creada exitosamente en Bsale. ID de Devolución: ' . $response->id;
+            if(isset($response->credit_note->urlPdf)) {
+                $note .= sprintf(' <a href="%s" target="_blank">Ver PDF</a>', esc_url($response->credit_note->urlPdf));
+            }
+            $order->add_order_note( $note );
+            $order->save();
+        }
     }
 }

@@ -85,33 +85,35 @@ final class BWI_Admin {
         register_setting( 'bwi_settings_group', 'bwi_options', [ $this, 'sanitize_options' ] );
 
         // --- SECCIÓN: Configuración de la API ---
-        add_settings_section( 'bwi_api_settings_section', 'Configuración de Credenciales (wp-config.php)', [ $this, 'section_callback' ], 'bwi_settings' );
+        add_settings_section( 'bwi_api_settings_section', 'Configuración de Credenciales (wp-config.php)', null, 'bwi_settings' );
         add_settings_field( 'bwi_access_token_info', 'Access Token', [ $this, 'render_access_token_info_field' ], 'bwi_settings', 'bwi_api_settings_section' );
         add_settings_field( 'bwi_webhook_secret_info', 'Secreto del Webhook', [ $this, 'render_webhook_secret_info_field' ], 'bwi_settings', 'bwi_api_settings_section' );
 
         // --- SECCIÓN: Sincronización de Productos ---
-        add_settings_section( 'bwi_sync_settings_section', 'Sincronización de Productos', [ $this, 'section_callback' ], 'bwi_settings' );
+        add_settings_section( 'bwi_sync_settings_section', 'Sincronización de Productos', null, 'bwi_settings' );
         add_settings_field( 'bwi_office_id_stock', 'Sucursal para Stock', [ $this, 'render_office_id_stock_field' ], 'bwi_settings', 'bwi_sync_settings_section' );
+        // NUEVO CAMPO: Lista de Precios
+        add_settings_field( 'bwi_price_list_id', 'Lista de Precios', [ $this, 'render_price_list_id_field' ], 'bwi_settings', 'bwi_sync_settings_section' );
         
         // --- SECCIÓN: Facturación ---
-        add_settings_section( 'bwi_billing_settings_section', 'Facturación y Documentos', [ $this, 'section_callback' ], 'bwi_settings' );
+        add_settings_section( 'bwi_billing_settings_section', 'Facturación y Documentos', null, 'bwi_settings' );
         add_settings_field( 'bwi_enable_billing', 'Activar Creación de Documentos', [ $this, 'render_enable_billing_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
         add_settings_field( 'bwi_trigger_status', 'Estado para Generar Documento', [ $this, 'render_trigger_status_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
         add_settings_field( 'bwi_boleta_codesii', 'Código SII para Boletas', [ $this, 'render_boleta_codesii_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
         add_settings_field( 'bwi_factura_codesii', 'Código SII para Facturas', [ $this, 'render_factura_codesii_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
     
         // --- SECCIÓN: Webhooks ---
-        add_settings_section( 'bwi_webhooks_section', 'Configuración de Webhooks', [ $this, 'section_callback' ], 'bwi_settings' );
+        add_settings_section( 'bwi_webhooks_section', 'Configuración de Webhooks', null, 'bwi_settings' );
         add_settings_field( 'bwi_webhook_url', 'URL para Webhooks', [ $this, 'render_webhook_url_field' ], 'bwi_settings', 'bwi_webhooks_section' );
 
         // --- SECCIÓN: Acciones Manuales ---
-        add_settings_section( 'bwi_manual_actions_section', 'Acciones Manuales', [ $this, 'section_callback' ], 'bwi_settings' );
+        add_settings_section( 'bwi_manual_actions_section', 'Acciones Manuales', null, 'bwi_settings' );
         add_settings_field( 'bwi_manual_sync_button', 'Sincronización Manual', [ $this, 'render_manual_sync_button_field' ], 'bwi_settings', 'bwi_manual_actions_section' );
     }
 
     /**
      * Función de callback para el texto de las secciones.
-     */
+     */ /*
     public function section_callback( $args ) {
         // ... (código existente de la función)
         switch ( $args['id'] ) {
@@ -128,7 +130,7 @@ final class BWI_Admin {
                 echo '<p>Ejecuta acciones de sincronización de forma manual. Útil para la configuración inicial o para forzar una actualización.</p>';
                 break;
         }
-    }
+    }*/
 
     /**
      * Renderiza los campos de los ajustes.
@@ -209,6 +211,42 @@ final class BWI_Admin {
         echo '</select>';
         echo '<p class="description">Seleccione la sucursal de Bsale. La lista se actualiza desde la API cada 12 horas.</p>';
     }
+    /**
+     * Renderiza el campo para seleccionar la Lista de Precios.
+     */
+    public function render_price_list_id_field() {
+        $options = get_option('bwi_options');
+        $selected_list_id = isset($options['price_list_id']) ? $options['price_list_id'] : '';
+
+        $price_lists = get_transient('bwi_price_lists');
+        if ( false === $price_lists ) {
+            $api_client = BWI_API_Client::get_instance();
+            $response = $api_client->get('price_lists.json');
+            
+            $price_lists = [];
+            if ( !is_wp_error($response) && !empty($response->items) ) {
+                $price_lists = $response->items;
+                set_transient( 'bwi_price_lists', $price_lists, 12 * HOUR_IN_SECONDS );
+            }
+        }
+
+        echo '<select name="bwi_options[price_list_id]">';
+        if ( !empty($price_lists) ) {
+            echo '<option value="">-- No sincronizar precios --</option>';
+            foreach ( $price_lists as $list ) {
+                printf(
+                    '<option value="%d" %s>%s</option>',
+                    esc_attr($list->id),
+                    selected($selected_list_id, $list->id, false),
+                    esc_html($list->name)
+                );
+            }
+        } else {
+            echo '<option value="">No se pudieron cargar las listas de precios.</option>';
+        }
+        echo '</select>';
+        echo '<p class="description">Seleccione la lista de precios de Bsale que se usará para actualizar los precios en WooCommerce.</p>';
+    }
     public function render_enable_billing_field() {
         $options = get_option( 'bwi_options' );
         $checked = isset( $options['enable_billing'] ) ? checked( 1, $options['enable_billing'], false ) : '';
@@ -265,6 +303,7 @@ final class BWI_Admin {
         $new_input = [];
         // Las credenciales ya no se guardan aquí.
         if ( isset( $input['office_id_stock'] ) ) $new_input['office_id_stock'] = absint( $input['office_id_stock'] );
+        if ( isset( $input['price_list_id'] ) ) $new_input['price_list_id'] = absint( $input['price_list_id'] );
         if ( isset( $input['enable_billing'] ) ) $new_input['enable_billing'] = absint( $input['enable_billing'] );
         if ( isset( $input['trigger_status'] ) ) $new_input['trigger_status'] = sanitize_text_field( $input['trigger_status'] );
         if ( isset( $input['boleta_codesii'] ) ) $new_input['boleta_codesii'] = absint( $input['boleta_codesii'] );
