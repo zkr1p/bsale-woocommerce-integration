@@ -218,15 +218,17 @@ final class BWI_Admin {
         $options = get_option('bwi_options');
         $selected_list_id = isset($options['price_list_id']) ? $options['price_list_id'] : '';
 
-        $price_lists = get_transient('bwi_price_lists');
+        $price_lists = get_transient('bwi_active_price_lists'); // Cambiamos el nombre del transient
         if ( false === $price_lists ) {
             $api_client = BWI_API_Client::get_instance();
-            $response = $api_client->get('price_lists.json');
+            
+            // MEJORA: Añadimos el parámetro 'state' => 0 para obtener solo las listas activas.
+            $response = $api_client->get('price_lists.json', ['state' => 0]);
             
             $price_lists = [];
             if ( !is_wp_error($response) && !empty($response->items) ) {
                 $price_lists = $response->items;
-                set_transient( 'bwi_price_lists', $price_lists, 12 * HOUR_IN_SECONDS );
+                set_transient( 'bwi_active_price_lists', $price_lists, 12 * HOUR_IN_SECONDS );
             }
         }
 
@@ -242,7 +244,7 @@ final class BWI_Admin {
                 );
             }
         } else {
-            echo '<option value="">No se pudieron cargar las listas de precios.</option>';
+            echo '<option value="">No se pudieron cargar las listas de precios activas.</option>';
         }
         echo '</select>';
         echo '<p class="description">Seleccione la lista de precios de Bsale que se usará para actualizar los precios en WooCommerce.</p>';
