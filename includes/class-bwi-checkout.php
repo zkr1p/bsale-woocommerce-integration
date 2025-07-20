@@ -57,12 +57,12 @@ final class BWI_Checkout {
      * Añade los campos personalizados al formulario de checkout.
      */
     public function add_custom_checkout_fields( $checkout ) {
-        echo '<div id="bwi-billing-options"><h3>' . esc_html__( 'Documento Tributario', 'bsale-woocommerce-integration' ) . '</h3>';
-
+        echo '<div id="bwi-billing-options-wrapper"><h3>' . esc_html__( 'Documento Tributario', 'bsale-woocommerce-integration' ) . '</h3>';
+        // MEJORA UX/UI: Usamos un campo 'select' en lugar de 'radio'
         woocommerce_form_field( 'bwi_document_type', [
-            'type'    => 'radio',
+            'type'    => 'select',
             'class'   => [ 'form-row-wide' ],
-            'label'   => esc_html__( 'Tipo de Documento', 'bsale-woocommerce-integration' ),
+            'label'   => esc_html__( '¿Qué tipo de documento necesitas?', 'bsale-woocommerce-integration' ),
             'options' => [
                 'boleta'  => esc_html__( 'Boleta', 'bsale-woocommerce-integration' ),
                 'factura' => esc_html__( 'Factura', 'bsale-woocommerce-integration' ),
@@ -70,6 +70,7 @@ final class BWI_Checkout {
             'default' => 'boleta',
         ], $checkout->get_value( 'bwi_document_type' ) );
 
+        // Contenedor para los campos de factura
         echo '<div id="bwi-factura-fields" style="display:none;">';
 
         // Campo para Razón Social
@@ -165,14 +166,24 @@ final class BWI_Checkout {
     /**
      * Encola el script JS para el checkout.
      */
-    public function enqueue_checkout_scripts() {
+    public function enqueue_checkout_assets() {
+        // Solo cargar en la página de checkout.
         if ( is_checkout() ) {
+            // Encolar el archivo JavaScript.
             wp_enqueue_script(
                 'bwi-checkout-script',
-                BWI_PLUGIN_URL . 'js/bwi-checkout.js',
+                BWI_PLUGIN_URL . 'assets/js/bwi-checkout.js', 
                 [ 'jquery' ],
-                '2.6.0', // Incrementa la versión del script
+                '2.7.0',
                 true
+            );
+
+            // Encolar el archivo CSS.
+            wp_enqueue_style(
+                'bwi-checkout-style',
+                BWI_PLUGIN_URL . 'assets/css/bwi-checkout.css',
+                [], // Sin dependencias de otros CSS
+                '2.7.0'
             );
         }
     }

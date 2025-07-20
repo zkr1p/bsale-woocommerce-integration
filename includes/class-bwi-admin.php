@@ -325,10 +325,10 @@ final class BWI_Admin {
         // Crear un nuevo archivo js/bwi-admin.js y pegar el código JS allí
         wp_enqueue_script(
             'bwi-admin-script',
-            BWI_PLUGIN_URL . 'js/bwi-admin.js',
-            [ 'jquery' ], // Dependencia de jQuery
-            '1.0.0',
-            true // Cargar en el footer
+            BWI_PLUGIN_URL . 'assets/js/bwi-admin.js', 
+            [ 'jquery' ],
+            '2.7.0', // Buena práctica: incrementa la versión
+            true // cargar en el footer
         );
 
         // Pasar datos de PHP a JavaScript de forma segura
