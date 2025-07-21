@@ -40,6 +40,9 @@ final class BWI_Checkout {
 
         // Hook para añadir el script JS al frontend
         add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_checkout_assets' ] );
+
+        // Hook para modificar los campos y títulos del checkout.
+        add_filter( 'woocommerce_checkout_fields', [ $this, 'customize_checkout_fields' ] );
     }
 
     /**
@@ -51,6 +54,21 @@ final class BWI_Checkout {
             self::$instance = new self();
         }
         return self::$instance;
+    }
+
+    /**
+     * Modifica los campos y títulos del checkout.
+     *
+     * @param array $fields Campos originales del checkout.
+     * @return array Campos modificados.
+     */
+    public function customize_checkout_fields( $fields ) {
+        // MEJORA: Cambiar el título de la sección de facturación.
+        if ( isset( $fields['billing']['billing_first_name'] ) ) { // Verificamos que la sección exista.
+            $fields['billing']['billing_address_1']['label'] = __('Dirección de Envío', 'bsale-woocommerce-integration');
+        }
+
+        return $fields;
     }
 
     /**
@@ -100,6 +118,30 @@ final class BWI_Checkout {
             'required'    => true,
         ], $checkout->get_value( 'bwi_billing_activity' ) );
 
+        echo '<p class="form-row form-row-wide" style="font-weight:bold; margin-top:1em;">' . esc_html__( 'Dirección de Facturación', 'bsale-woocommerce-integration' ) . '</p>';
+
+        woocommerce_form_field( 'bwi_fiscal_address', [
+            'type'        => 'text',
+            'class'       => [ 'form-row-wide' ],
+            'label'       => esc_html__( 'Dirección Fiscal', 'bsale-woocommerce-integration' ),
+            'placeholder' => esc_html__( 'Calle y número', 'bsale-woocommerce-integration' ),
+            'required'    => true,
+        ], $checkout->get_value( 'bwi_fiscal_address' ) );
+        
+        woocommerce_form_field( 'bwi_fiscal_city', [
+            'type'        => 'text',
+            'class'       => [ 'form-row-first' ],
+            'label'       => esc_html__( 'Ciudad', 'bsale-woocommerce-integration' ),
+            'required'    => true,
+        ], $checkout->get_value( 'bwi_fiscal_city' ) );
+
+        woocommerce_form_field( 'bwi_fiscal_municipality', [
+            'type'        => 'text',
+            'class'       => [ 'form-row-last' ],
+            'label'       => esc_html__( 'Comuna', 'bsale-woocommerce-integration' ),
+            'required'    => true,
+        ], $checkout->get_value( 'bwi_fiscal_municipality' ) );
+
         echo '</div></div>';
     }
 
@@ -108,15 +150,12 @@ final class BWI_Checkout {
      */
     public function validate_custom_fields() {
         if ( isset($_POST['bwi_document_type']) && 'factura' === $_POST['bwi_document_type'] ) {
-            if ( empty( $_POST['bwi_billing_company_name'] ) ) {
-                wc_add_notice( __( 'Por favor, introduce la Razón Social para la factura.', 'bsale-woocommerce-integration' ), 'error' );
-            }
-            if ( empty( $_POST['bwi_billing_rut'] ) ) {
-                wc_add_notice( __( 'Por favor, introduce el RUT de la empresa para la factura.', 'bsale-woocommerce-integration' ), 'error' );
-            }
-            if ( empty( $_POST['bwi_billing_activity'] ) ) {
-                wc_add_notice( __( 'Por favor, introduce el Giro para la factura.', 'bsale-woocommerce-integration' ), 'error' );
-            }
+            if ( empty( $_POST['bwi_billing_company_name'] ) ) wc_add_notice( 'La <strong>Razón Social</strong> es un campo requerido para la factura.', 'error' );
+            if ( empty( $_POST['bwi_billing_rut'] ) ) wc_add_notice( 'El <strong>RUT</strong> es un campo requerido para la factura.', 'error' );
+            if ( empty( $_POST['bwi_billing_activity'] ) ) wc_add_notice( 'El <strong>Giro</strong> es un campo requerido para la factura.', 'error' );
+            if ( empty( $_POST['bwi_fiscal_address'] ) ) wc_add_notice( 'La <strong>Dirección Fiscal</strong> es un campo requerido para la factura.', 'error' );
+            if ( empty( $_POST['bwi_fiscal_city'] ) ) wc_add_notice( 'La <strong>Ciudad</strong> de facturación es un campo requerido.', 'error' );
+            if ( empty( $_POST['bwi_fiscal_municipality'] ) ) wc_add_notice( 'La <strong>Comuna</strong> de facturación es un campo requerido.', 'error' );
         }
     }
 
@@ -129,15 +168,12 @@ final class BWI_Checkout {
             $order->update_meta_data( '_bwi_document_type', sanitize_text_field( $_POST['bwi_document_type'] ) );
         }
         if ( isset( $_POST['bwi_document_type'] ) && 'factura' === $_POST['bwi_document_type'] ) {
-            if ( ! empty( $_POST['bwi_billing_company_name'] ) ) {
-                $order->update_meta_data( '_bwi_billing_company_name', sanitize_text_field( $_POST['bwi_billing_company_name'] ) );
-            }
-            if ( ! empty( $_POST['bwi_billing_rut'] ) ) {
-                $order->update_meta_data( '_bwi_billing_rut', sanitize_text_field( $_POST['bwi_billing_rut'] ) );
-            }
-            if ( ! empty( $_POST['bwi_billing_activity'] ) ) {
-                $order->update_meta_data( '_bwi_billing_activity', sanitize_text_field( $_POST['bwi_billing_activity'] ) );
-            }
+            if ( ! empty( $_POST['bwi_billing_company_name'] ) ) $order->update_meta_data( '_bwi_billing_company_name', sanitize_text_field( $_POST['bwi_billing_company_name'] ) );
+            if ( ! empty( $_POST['bwi_billing_rut'] ) ) $order->update_meta_data( '_bwi_billing_rut', sanitize_text_field( $_POST['bwi_billing_rut'] ) );
+            if ( ! empty( $_POST['bwi_billing_activity'] ) ) $order->update_meta_data( '_bwi_billing_activity', sanitize_text_field( $_POST['bwi_billing_activity'] ) );
+            if ( ! empty( $_POST['bwi_fiscal_address'] ) ) $order->update_meta_data( '_bwi_fiscal_address', sanitize_text_field( $_POST['bwi_fiscal_address'] ) );
+            if ( ! empty( $_POST['bwi_fiscal_city'] ) ) $order->update_meta_data( '_bwi_fiscal_city', sanitize_text_field( $_POST['bwi_fiscal_city'] ) );
+            if ( ! empty( $_POST['bwi_fiscal_municipality'] ) ) $order->update_meta_data( '_bwi_fiscal_municipality', sanitize_text_field( $_POST['bwi_fiscal_municipality'] ) );
         }
     }
 
@@ -147,9 +183,7 @@ final class BWI_Checkout {
      */
     public function display_custom_fields_in_admin_order( $order ) {
         $document_type = $order->get_meta( '_bwi_document_type' );
-        if ( empty($document_type) ) {
-            return;
-        }
+        if ( empty($document_type) ) return;
 
         echo '<div class="order_data_column">';
         echo '<h4>' . esc_html__( 'Datos de Facturación Bsale', 'bsale-woocommerce-integration' ) . '</h4>';
@@ -159,6 +193,9 @@ final class BWI_Checkout {
             echo '<p><strong>' . esc_html__( 'Razón Social:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( $order->get_meta( '_bwi_billing_company_name' ) ) . '</p>';
             echo '<p><strong>' . esc_html__( 'RUT Empresa:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( $order->get_meta( '_bwi_billing_rut' ) ) . '</p>';
             echo '<p><strong>' . esc_html__( 'Giro:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( $order->get_meta( '_bwi_billing_activity' ) ) . '</p>';
+            echo '<p><strong>' . esc_html__( 'Dirección Fiscal:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( $order->get_meta( '_bwi_fiscal_address' ) ) . '</p>';
+            echo '<p><strong>' . esc_html__( 'Ciudad Fiscal:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( $order->get_meta( '_bwi_fiscal_city' ) ) . '</p>';
+            echo '<p><strong>' . esc_html__( 'Comuna Fiscal:', 'bsale-woocommerce-integration' ) . '</strong> ' . esc_html( $order->get_meta( '_bwi_fiscal_municipality' ) ) . '</p>';
         }
         echo '</div>';
     }
@@ -174,7 +211,7 @@ final class BWI_Checkout {
                 'bwi-checkout-script',
                 BWI_PLUGIN_URL . 'assets/js/bwi-checkout.js', 
                 [ 'jquery' ],
-                '2.7.0',
+                '2.8.0',
                 true
             );
 
@@ -183,7 +220,7 @@ final class BWI_Checkout {
                 'bwi-checkout-style',
                 BWI_PLUGIN_URL . 'assets/css/bwi-checkout.css',
                 [], // Sin dependencias de otros CSS
-                '2.7.0'
+                '2.9.0'
             );
         }
     }
