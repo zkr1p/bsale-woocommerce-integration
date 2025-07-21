@@ -139,15 +139,18 @@ final class BWI_Admin {
     }
 
     public function render_webhook_url_field() {
-        $secret = defined('BWI_WEBHOOK_SECRET') ? BWI_WEBHOOK_SECRET : '';
-        if (empty($secret)) {
-            echo '<p class="description" style="color: red;">Defina el secreto del Webhook en wp-config.php para generar la URL.</p>';
-            return;
-        }
-        $webhook_url = add_query_arg( 'token', $secret, get_rest_url( null, 'bwi/v1/webhook' ) );
-        echo '<input type="text" value="' . esc_url( $webhook_url ) . '" readonly class="large-text code">';
-        echo '<p class="description">Copia esta URL y pégala en la configuración de webhooks de Bsale.</p>';
+    $secret = defined('BWI_WEBHOOK_SECRET') ? BWI_WEBHOOK_SECRET : '';
+    if (empty($secret)) {
+        echo '<p class="description" style="color: red;">Defina el secreto del Webhook en wp-config.php para generar la URL.</p>';
+        return;
     }
+
+    // Construir la URL con el token en la ruta, sin parámetros.
+    $webhook_url = get_rest_url( null, 'bwi/v1/webhook/' . $secret );
+    
+    echo '<input type="text" value="' . esc_url( $webhook_url ) . '" readonly class="large-text code">';
+    echo '<p class="description">Copia esta URL y pégala en la configuración de webhooks de Bsale.</p>';
+}
     public function render_access_token_field() { 
         $options = get_option( 'bwi_options' );
         $value = isset( $options['access_token'] ) ? $options['access_token'] : '';

@@ -42,10 +42,10 @@ final class BWI_Webhooks {
      * Registra el endpoint en la API REST de WordPress.
      */
     public function register_webhook_endpoint() {
-        register_rest_route( 'bwi/v1', '/webhook', [
+        register_rest_route( 'bwi/v1', '/webhook/(?P<token>\S+)', [
             'methods'             => 'POST',
             'callback'            => [ $this, 'handle_incoming_webhook' ],
-            'permission_callback' => '__return_true', // La seguridad se manejará de otra forma.
+            'permission_callback' => '__return_true',
         ] );
     }
 
@@ -57,16 +57,16 @@ final class BWI_Webhooks {
      */
     public function handle_incoming_webhook( WP_REST_Request $request ) {
         $logger = wc_get_logger();
-        //$payload = $request->get_json_params();
-
-        $secret_token = defined('BWI_WEBHOOK_SECRET') ? BWI_WEBHOOK_SECRET : '';
+        
+        // Leer el token desde la ruta de la URL, no desde un parámetro.
         $received_token = $request->get_param('token');
+        $secret_token = defined('BWI_WEBHOOK_SECRET') ? BWI_WEBHOOK_SECRET : '';
 
         if ( empty($secret_token) || ! $received_token || ! hash_equals( $secret_token, $received_token ) ) {
-            $logger->error( 'Intento de acceso a Webhook con token inválido.', [ 'source' => 'bwi-webhooks' ] );
+            $logger->error( 'Intento de acceso a Webhook con token de seguridad inválido.', [ 'source' => 'bwi-webhooks' ] );
             return new WP_REST_Response( [ 'status' => 'error', 'message' => 'Token de seguridad inválido.' ], 401 );
         }
-        
+
         $payload = $request->get_json_params();
         $logger->info( 'Webhook de Bsale recibido y validado: ' . wp_json_encode( $payload ), [ 'source' => 'bwi-webhooks' ] );
 
@@ -74,10 +74,9 @@ final class BWI_Webhooks {
             return new WP_REST_Response( [ 'status' => 'error', 'message' => 'Payload inválido.' ], 400 );
         }
 
-        // MEJORA DE RENDIMIENTO: Delegar el procesamiento a una acción asíncrona.
         as_enqueue_async_action( 'bwi_process_webhook_payload', [ 'payload' => $payload ], 'bwi-webhooks' );
 
-        return new WP_REST_Response( [ 'status' => 'success', 'message' => 'Webhook recibido y encolado para procesamiento.' ], 200 );
+        return new WP_REST_Response( [ 'status' => 'success', 'message' => 'Webhook recibido y encolado.' ], 200 );
     }
 
     /*
