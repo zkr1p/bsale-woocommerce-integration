@@ -1,14 +1,18 @@
-/**
- * Estilos para los campos personalizados de Bsale en el checkout de WooCommerce.
- */
+ /**
+  * Estilos para los campos personalizados de Bsale en el checkout de WooCommerce.
+  */
 
-#bwi_document_type_field label {
-    display: inline-block;
-    margin-right: 15px;
-    vertical-align: middle;
-}
+ #bwi_document_type_field label {
+     display: block; /* Texto arriba */
+     margin-bottom: 5px; /* Espacio entre el texto y el selector */
+ }
 
-#bwi_document_type_field .woocommerce-input-wrapper {
-    display: inline-block;
-    vertical-align: middle;
-}
+ #bwi_document_type_field .woocommerce-input-wrapper {
+     display: block; /* Selector abajo */
+     width: 100%; /* Ancho del 100% */
+ }
+
+ #bwi_document_type {
+     width: 100%; /* Asegurar que el <select> también ocupe el 100% */
+ }
+ 

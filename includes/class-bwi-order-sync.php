@@ -129,31 +129,40 @@ final class BWI_Order_Sync {
      */
     private function build_bsale_payload( $order ) {
         $document_type = $order->get_meta( '_bwi_document_type' );
-        $billing_rut = $order->get_meta( '_bwi_billing_rut' );
 
+        // LÓGICA DE FACTURA
         if ( 'factura' === $document_type ) {
             $code_sii = ! empty( $this->options['factura_codesii'] ) ? absint($this->options['factura_codesii']) : 33;
-            $client_rut = ! empty( $billing_rut ) ? $billing_rut : '';
-            if ( empty($client_rut) ) {
-                return new WP_Error( 'missing_rut_for_invoice', 'Se intentó crear una factura sin un RUT de cliente.' );
-            }
-        } else {
+            
+            // Usamos los campos fiscales personalizados que creamos.
+            $client_data = [
+                'code'           => $order->get_meta( '_bwi_billing_rut' ),
+                'company'        => $order->get_meta( '_bwi_billing_company_name' ),
+                'activity'       => $order->get_meta( '_bwi_billing_activity' ),
+                'address'        => $order->get_meta( '_bwi_fiscal_address' ),
+                'municipality'   => $order->get_meta( '_bwi_fiscal_municipality' ),
+                'city'           => $order->get_meta( '_bwi_fiscal_city' ),
+                'email'          => $order->get_billing_email(), // El email de contacto se mantiene
+                'phone'          => $order->get_billing_phone(),   // El teléfono de contacto se mantiene
+                'companyOrPerson' => 1,
+            ];
+        } 
+        // LÓGICA DE BOLETA
+        else {
             $code_sii = ! empty( $this->options['boleta_codesii'] ) ? absint($this->options['boleta_codesii']) : 39;
-            // CORRECCIÓN DE BUG: Usar RUT genérico para boletas.
-            $client_rut = '1-9';
+            
+            // Para boleta, usamos los datos de facturación de WC (que son los de envío).
+            $client_data = [
+                'code'           => '1-9',
+                'company'        => $order->get_formatted_billing_full_name(),
+                'address'        => $order->get_billing_address_1(),
+                'municipality'   => $order->get_billing_state(),
+                'city'           => $order->get_billing_city(),
+                'email'          => $order->get_billing_email(),
+                'phone'          => $order->get_billing_phone(),
+                'companyOrPerson' => 0,
+            ];
         }
-        
-        $client_data = [
-            'code'           => $client_rut,
-            'city'           => $order->get_billing_city(),
-            'company'        => $order->get_billing_company() ?: $order->get_formatted_billing_full_name(),
-            'municipality'   => $order->get_billing_state(),
-            'activity'       => ( 'factura' === $document_type ) ? 'Giro de la empresa' : 'Consumidor Final',
-            'address'        => $order->get_billing_address_1(),
-            'email'          => $order->get_billing_email(),
-            'phone'          => $order->get_billing_phone(),
-            'companyOrPerson' => ( 'factura' === $document_type ) ? 1 : 0,
-        ];
 
         $details = [];
         foreach ( $order->get_items() as $item ) {
@@ -181,10 +190,10 @@ final class BWI_Order_Sync {
         }
 
         $payload = [
-            'salesId'      => $order->get_order_key(), // Idempotencia para evitar documentos duplicados
+            'salesId'      => $order->get_order_key(),
             'codeSii'      => $code_sii,
             'officeId'     => ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 1,
-            'priceListId'  => 1, // Se puede hacer configurable en el futuro.
+            'priceListId'  => ! empty( $this->options['price_list_id'] ) ? absint($this->options['price_list_id']) : 1,
             'emissionDate' => time(),
             'client'       => $client_data,
             'details'      => $details,
@@ -192,6 +201,31 @@ final class BWI_Order_Sync {
 
         return $payload;
     }
+    /**
+     * FUNCIÓN QUE FALTABA: Dispara la creación de la Nota de Crédito encolando una tarea asíncrona.
+     * @param int $order_id
+     */
+    public function trigger_credit_note_creation( $order_id ) {
+        if ( empty( $this->options['enable_billing'] ) ) {
+            return;
+        }
+
+        $order = wc_get_order( $order_id );
+
+        // Validar que exista un documento original y que no se haya creado ya una nota de crédito.
+        if ( ! $order->get_meta( '_bwi_document_id' ) || $order->get_meta( '_bwi_return_id' ) ) {
+            return;
+        }
+        
+        // Evitar duplicados si ya hay una tarea en cola.
+        if ( as_next_scheduled_action( 'bwi_create_credit_note_for_order', [ 'order_id' => $order_id ] ) ) {
+            return;
+        }
+
+        as_enqueue_async_action( 'bwi_create_credit_note_for_order', [ 'order_id' => $order_id ], 'bwi-orders' );
+        $order->add_order_note( __( 'Solicitud de creación de Nota de Crédito en Bsale ha sido encolada.', 'bsale-woocommerce-integration' ) );
+    }
+
 
     /**
      * Procesa la creación de la Nota de Crédito.
@@ -230,13 +264,14 @@ final class BWI_Order_Sync {
             ];
         }
 
+        // Aquí usamos el método que ya creamos en el cliente de la API
         $response = $api_client->create_return( $payload );
 
         if ( is_wp_error( $response ) ) {
             $order->add_order_note( '<strong>Error al crear Nota de Crédito en Bsale:</strong> ' . $response->get_error_message() );
         } else if ( isset( $response->id ) ) {
             $order->update_meta_data( '_bwi_return_id', $response->id );
-            // La respuesta de la API de devoluciones puede variar, ajusta según sea necesario.
+            
             $note = 'Nota de Crédito creada exitosamente en Bsale. ID de Devolución: ' . $response->id;
             if(isset($response->credit_note->urlPdf)) {
                 $note .= sprintf(' <a href="%s" target="_blank">Ver PDF</a>', esc_url($response->credit_note->urlPdf));
@@ -245,4 +280,5 @@ final class BWI_Order_Sync {
             $order->save();
         }
     }
+
 }

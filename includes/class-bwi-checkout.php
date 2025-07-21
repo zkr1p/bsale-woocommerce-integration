@@ -26,8 +26,8 @@ final class BWI_Checkout {
      * Constructor.
      */
     private function __construct() {
-        // Hook para añadir los campos personalizados al checkout
-        add_action( 'woocommerce_after_order_notes', [ $this, 'add_custom_checkout_fields' ] );
+        // Cambiamos el hook para mostrar los campos antes de las "Notas del Pedido".
+        add_action( 'woocommerce_before_order_notes', [ $this, 'add_custom_checkout_fields' ] );
 
         // Hook para validar los campos personalizados
         add_action( 'woocommerce_checkout_process', [ $this, 'validate_custom_fields' ] );
@@ -41,8 +41,6 @@ final class BWI_Checkout {
         // Hook para añadir el script JS al frontend
         add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_checkout_assets' ] );
 
-        // Hook para modificar los campos y títulos del checkout.
-        add_filter( 'woocommerce_checkout_fields', [ $this, 'customize_checkout_fields' ] );
     }
 
     /**
@@ -54,21 +52,6 @@ final class BWI_Checkout {
             self::$instance = new self();
         }
         return self::$instance;
-    }
-
-    /**
-     * Modifica los campos y títulos del checkout.
-     *
-     * @param array $fields Campos originales del checkout.
-     * @return array Campos modificados.
-     */
-    public function customize_checkout_fields( $fields ) {
-        // MEJORA: Cambiar el título de la sección de facturación.
-        if ( isset( $fields['billing']['billing_first_name'] ) ) { // Verificamos que la sección exista.
-            $fields['billing']['billing_address_1']['label'] = __('Dirección de Envío', 'bsale-woocommerce-integration');
-        }
-
-        return $fields;
     }
 
     /**
@@ -86,6 +69,7 @@ final class BWI_Checkout {
                 'factura' => esc_html__( 'Factura', 'bsale-woocommerce-integration' ),
             ],
             'default' => 'boleta',
+            'required' => true,
         ], $checkout->get_value( 'bwi_document_type' ) );
 
         // Contenedor para los campos de factura
@@ -114,7 +98,7 @@ final class BWI_Checkout {
             'type'        => 'text',
             'class'       => [ 'form-row-wide' ],
             'label'       => esc_html__( 'Giro', 'bsale-woocommerce-integration' ),
-            'placeholder' => esc_html__( 'Ej: Servicios Informáticos', 'bsale-woocommerce-integration' ),
+            'placeholder' => esc_html__( 'Ej: ACTIVIDADES DE RESTAURANTES Y DE SERVICIO MÓVIL DE COMIDAS', 'bsale-woocommerce-integration' ),
             'required'    => true,
         ], $checkout->get_value( 'bwi_billing_activity' ) );
 

@@ -2,30 +2,32 @@
     'use strict';
 
     $(function() {
-        var facturaFields = $('#bwi-factura-fields');
-        var companyNameField = $('#bwi_billing_company_name_field');
-        var rutField = $('#bwi_billing_rut_field');
-        var activityField = $('#bwi_billing_activity_field');
+        // Seleccionamos los elementos de forma más eficiente una sola vez.
+        var facturaFieldsContainer = $('#bwi-factura-fields');
+        var documentTypeSelector = $('#bwi_document_type'); // El selector <select>
 
+        /**
+         * Función para mostrar u ocultar los campos de factura
+         * basado en el valor del selector.
+         */
         function toggleFacturaFields() {
-            if ($('input[name="bwi_document_type"]:checked').val() === 'factura') {
-                facturaFields.slideDown();
-                // Hacemos los campos requeridos
-                companyNameField.addClass('validate-required');
-                rutField.addClass('validate-required');
-                activityField.addClass('validate-required');
+            // Verificamos el valor del <select>
+            if ( documentTypeSelector.val() === 'factura' ) {
+                facturaFieldsContainer.slideDown();
             } else {
-                facturaFields.slideUp();
-                // Quitamos el 'required' para que el formulario se pueda enviar.
-                companyNameField.removeClass('validate-required');
-                rutField.removeClass('validate-required');
-                activityField.removeClass('validate-required');
+                facturaFieldsContainer.slideUp();
             }
         }
 
-        $('body').on('change', 'input[name="bwi_document_type"]', toggleFacturaFields);
+        // --- LA CORRECCIÓN CLAVE ESTÁ AQUÍ ---
+        // Nos enganchamos al evento 'change' del selector '#bwi_document_type'
+        // en lugar de los antiguos botones de radio.
+        $('body').on('change', '#bwi_document_type', toggleFacturaFields);
+        
+        // Mantener el hook 'updated_checkout' es una buena práctica para la compatibilidad con temas.
         $(document.body).on('updated_checkout', toggleFacturaFields);
 
+        // Ejecutar la función una vez al cargar la página para establecer el estado inicial correcto.
         toggleFacturaFields();
     });
 
