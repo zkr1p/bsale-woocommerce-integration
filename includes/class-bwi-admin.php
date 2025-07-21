@@ -20,11 +20,13 @@ final class BWI_Admin {
      * @var BWI_Admin
      */
     private static $instance;
+    private $access_token; // Guardamos el token para usarlo en la clase.
 
     /**
      * Constructor.
      */
     private function __construct() {
+        $this->access_token = defined( 'BWI_ACCESS_TOKEN' ) ? BWI_ACCESS_TOKEN : '';
         add_action( 'admin_menu', [ $this, 'add_admin_menu' ] );
         add_action( 'admin_init', [ $this, 'register_settings' ] );
         // Hook para añadir scripts a nuestra página de admin
@@ -112,27 +114,6 @@ final class BWI_Admin {
     }
 
     /**
-     * Función de callback para el texto de las secciones.
-     */ /*
-    public function section_callback( $args ) {
-        // ... (código existente de la función)
-        switch ( $args['id'] ) {
-            case 'bwi_api_settings_section':
-                echo '<p>Introduce tus credenciales de la API de Bsale.</p>';
-                break;
-            case 'bwi_sync_settings_section':
-                echo '<p>Configura cómo se sincronizará el stock y los precios desde Bsale a WooCommerce.</p>';
-                break;
-            case 'bwi_billing_settings_section':
-                echo '<p>Configura la creación automática de documentos (boletas/facturas) en Bsale cuando se crea un pedido en WooCommerce.</p>';
-                break;
-            case 'bwi_manual_actions_section':
-                echo '<p>Ejecuta acciones de sincronización de forma manual. Útil para la configuración inicial o para forzar una actualización.</p>';
-                break;
-        }
-    }*/
-
-    /**
      * Renderiza los campos de los ajustes.
      */
     public function render_access_token_info_field() {
@@ -181,8 +162,10 @@ final class BWI_Admin {
         $options = get_option('bwi_options');
         $selected_office_id = isset($options['office_id_stock']) ? $options['office_id_stock'] : '';
 
-        // MEJORA DE RENDIMIENTO CON TRANSIENTS
-        $offices = get_transient('bwi_offices_list');
+        // MEJORA: Crear una clave de caché dinámica.
+        $transient_key = 'bwi_offices_' . substr(md5($this->access_token), 0, 12);
+        $offices = get_transient($transient_key);
+
         if ( false === $offices ) {
             $api_client = BWI_API_Client::get_instance();
             $response = $api_client->get('offices.json');
@@ -190,13 +173,12 @@ final class BWI_Admin {
             $offices = [];
             if ( !is_wp_error($response) && !empty($response->items) ) {
                 $offices = $response->items;
-                set_transient( 'bwi_offices_list', $offices, 12 * HOUR_IN_SECONDS );
+                set_transient( $transient_key, $offices, 12 * HOUR_IN_SECONDS );
             }
         }
 
         echo '<select name="bwi_options[office_id_stock]">';
         if ( !empty($offices) ) {
-            echo '<option value="">-- Seleccione una sucursal --</option>';
             foreach ( $offices as $office ) {
                 printf(
                     '<option value="%d" %s>%s</option>',
@@ -206,10 +188,10 @@ final class BWI_Admin {
                 );
             }
         } else {
-            echo '<option value="">No se pudieron cargar las sucursales. Verifique el Access Token.</option>';
+            echo '<option value="">No se pudieron cargar las sucursales.</option>';
         }
         echo '</select>';
-        echo '<p class="description">Seleccione la sucursal de Bsale. La lista se actualiza desde la API cada 12 horas.</p>';
+        echo '<p class="description">Seleccione la sucursal de Bsale de la cual se descontará el stock.</p>';
     }
     /**
      * Renderiza el campo para seleccionar la Lista de Precios.
@@ -218,17 +200,18 @@ final class BWI_Admin {
         $options = get_option('bwi_options');
         $selected_list_id = isset($options['price_list_id']) ? $options['price_list_id'] : '';
 
-        $price_lists = get_transient('bwi_active_price_lists'); // Cambiamos el nombre del transient
+        // MEJORA: Crear una clave de caché dinámica.
+        $transient_key = 'bwi_active_price_lists_' . substr(md5($this->access_token), 0, 12);
+        $price_lists = get_transient($transient_key);
+
         if ( false === $price_lists ) {
             $api_client = BWI_API_Client::get_instance();
-            
-            // MEJORA: Añadimos el parámetro 'state' => 0 para obtener solo las listas activas.
             $response = $api_client->get('price_lists.json', ['state' => 0]);
             
             $price_lists = [];
             if ( !is_wp_error($response) && !empty($response->items) ) {
                 $price_lists = $response->items;
-                set_transient( 'bwi_active_price_lists', $price_lists, 12 * HOUR_IN_SECONDS );
+                set_transient( $transient_key, $price_lists, 12 * HOUR_IN_SECONDS );
             }
         }
 
