@@ -3,7 +3,7 @@
  * Plugin Name:         Integración Bsale y WooCommerce - LOV
  * Plugin URI:          https://whydot.co
  * Description:         Sincroniza productos, stock, pedidos y facturación entre Bsale y WooCommerce basado en la documentación actualizada de la API de Bsale.
- * Version:             2.7.2
+ * Version:             2.7.3
  * Author:              WHYDOTCO
  * Author URI:          https://whydot.co
  * License:             GPLv2 or later
@@ -30,7 +30,25 @@ add_action( 'before_woocommerce_init', function() {
 // Definir constantes del plugin para rutas y URLs
 define( 'BWI_PLUGIN_PATH', plugin_dir_path( __FILE__ ) );
 define( 'BWI_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
-
+// NUEVO: Registrar los hooks de activación y desactivación del plugin.
+register_activation_hook( __FILE__, 'bwi_activate_plugin' );
+register_deactivation_hook( __FILE__, 'bwi_deactivate_plugin' );
+/**
+ * NUEVO: Función que se ejecuta UNA VEZ cuando el plugin se activa.
+ */
+function bwi_activate_plugin() {
+    // Programar el evento de sincronización si no existe ya.
+    if ( ! wp_next_scheduled( 'bwi_cron_sync_products' ) ) {
+        wp_schedule_event( time(), 'hourly', 'bwi_cron_sync_products' );
+    }
+}
+/**
+ * NUEVO: Función que se ejecuta UNA VEZ cuando el plugin se desactiva.
+ */
+function bwi_deactivate_plugin() {
+    // Limpiar la tarea programada para no dejar basura.
+    wp_clear_scheduled_hook( 'bwi_cron_sync_products' );
+}
 /**
  * Clase principal de la Integración.
  * Se encarga de cargar todas las dependencias y de inicializar el plugin.
