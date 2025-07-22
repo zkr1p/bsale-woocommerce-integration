@@ -84,33 +84,42 @@ final class BWI_Product_Sync {
      * Procesa un lote de productos y encola tareas por variante (lógica restaurada y funcional).
      */
     public function process_sync_batch( $offset = 0 ) {
-        $limit = 50;
-        $logger = wc_get_logger();
-        $logger->info( "Procesando lote de productos. Offset: {$offset}", [ 'source' => 'bwi-sync' ] );
+    $limit = 50; // Máximo permitido por la API
+    $logger = wc_get_logger();
+    $logger->info( "Procesando lote de productos. Offset: {$offset}", [ 'source' => 'bwi-sync' ] );
 
-        $params = [ 'limit' => $limit, 'offset' => $offset, 'expand' => '[variants]' ];
-        $response = $this->api_client->get( 'products.json', $params );
+    $params = [ 'limit' => $limit, 'offset' => $offset, 'expand' => '[variants]' ];
+    $response = $this->api_client->get( 'products.json', $params );
 
-        if ( is_wp_error( $response ) || empty( $response->items ) ) {
-            $logger->info( '== FIN DE SINCRONIZACIÓN MASIVA ==', [ 'source' => 'bwi-sync' ] );
-            return;
-        }
+    if ( is_wp_error( $response ) ) {
+        $logger->error( 'Error de API al obtener lote de productos: ' . $response->get_error_message(), [ 'source' => 'bwi-sync' ] );
+        return; // Detener si hay un error
+    }
+    
+    // Si no hay más items, la sincronización ha terminado.
+    if ( empty( $response->items ) ) {
+        $logger->info( '== FIN DE SINCRONIZACIÓN MASIVA: No hay más productos que procesar. ==', [ 'source' => 'bwi-sync' ] );
+        return;
+    }
 
-        foreach ( $response->items as $bsale_product ) {
-            // LA CORRECCIÓN CLAVE ESTÁ AQUÍ:
-            // Nos aseguramos de iterar sobre el array 'items' dentro del objeto 'variants'.
-            if ( ! empty( $bsale_product->variants ) && is_object( $bsale_product->variants ) && ! empty( $bsale_product->variants->items ) ) {
-                foreach ( $bsale_product->variants->items as $variant ) {
-                    // Convertimos los objetos a arrays ANTES de encolarlos para consistencia.
-                    $variant_data_array = json_decode(json_encode($variant), true);
-                    $product_data_array = json_decode(json_encode($bsale_product), true);
-                    as_enqueue_async_action( 'bwi_sync_single_variant', [ 'variant_data' => $variant_data_array, 'product_data' => $product_data_array ], 'bwi-sync' );
-                }
+    foreach ( $response->items as $bsale_product ) {
+        if ( ! empty( $bsale_product->variants ) && is_object( $bsale_product->variants ) && ! empty( $bsale_product->variants->items ) ) {
+            foreach ( $bsale_product->variants->items as $variant ) {
+                $variant_data_array = json_decode(json_encode($variant), true);
+                // Pasamos el nombre del producto padre para un mejor logging.
+                $product_name = isset($bsale_product->name) ? $bsale_product->name : 'N/A';
+                as_enqueue_async_action( 'bwi_sync_single_variant', [ 'variant_data' => $variant_data_array, 'product_name' => $product_name ], 'bwi-sync' );
             }
         }
-
-        as_enqueue_async_action( 'bwi_sync_products_batch', [ 'offset' => $offset + $limit ], 'bwi-sync' );
     }
+
+    // Si la respuesta indica que hay una página siguiente, encolamos el próximo lote.
+    if ( isset($response->next) && !empty($response->next) ) {
+        as_enqueue_async_action( 'bwi_sync_products_batch', [ 'offset' => $offset + $limit ], 'bwi-sync' );
+    } else {
+        $logger->info( '== FIN DE SINCRONIZACIÓN MASIVA: Se procesó la última página de productos. ==', [ 'source' => 'bwi-sync' ] );
+    }
+}
 
     
     /**
@@ -123,56 +132,81 @@ final class BWI_Product_Sync {
      * Actualiza un producto existente en WooCommerce (lógica restaurada y mejorada).
      */
     public function update_product_from_variant( $variant_data, $product_name ) {
-        $logger = wc_get_logger();
-        $sku = isset($variant_data['code']) ? $variant_data['code'] : null;
-        $variant_id = isset($variant_data['id']) ? $variant_data['id'] : null;
-        
-        $logger->info( "--- Iniciando procesamiento para SKU: [{$sku}] (VariantID: {$variant_id}) ---", [ 'source' => 'bwi-sync' ] );
+    $logger = wc_get_logger();
+    $sku = isset($variant_data['code']) ? $variant_data['code'] : null;
+    $variant_id = isset($variant_data['id']) ? $variant_data['id'] : null;
+    
+    $logger->info( "--- Iniciando procesamiento para SKU: [{$sku}] (Producto: {$product_name}, VariantID: {$variant_id}) ---", [ 'source' => 'bwi-sync' ] );
 
-        if ( empty( $sku ) ) { /* ... */ return; }
-        $product_id = wc_get_product_id_by_sku( $sku );
-        if ( ! $product_id ) {
-            $logger->info( "OMITIENDO: No se encontró producto en WooCommerce con SKU [{$sku}].", [ 'source' => 'bwi-sync' ] );
+    if ( empty( $sku ) ) {
+        $logger->warning( "OMITIENDO: La variante con ID [{$variant_id}] no tiene un SKU (code) en Bsale.", [ 'source' => 'bwi-sync' ] );
+        return;
+    }
+
+    $product_id = wc_get_product_id_by_sku( $sku );
+    if ( ! $product_id ) {
+        $logger->info( "OMITIENDO: No se encontró producto en WooCommerce con SKU [{$sku}].", [ 'source' => 'bwi-sync' ] );
+        return;
+    }
+
+    try {
+        $product = wc_get_product( $product_id );
+        if ( ! $product ) {
+            $logger->error( "ERROR: Se encontró un ID de producto para el SKU [{$sku}], pero no se pudo cargar el objeto del producto.", [ 'source' => 'bwi-sync' ] );
             return;
         }
 
-        try {
-            $product = wc_get_product( $product_id );
-            $has_changes = false;
+        $has_changes = false;
+        $log_details = [];
 
-            // --- SINCRONIZACIÓN DE STOCK (lógica funcional restaurada) ---
-            $stock = $this->get_stock_for_variant( $variant_id );
-            if ( ! is_wp_error( $stock ) ) {
-                $current_stock = (int) $product->get_stock_quantity();
-                if ( $current_stock !== (int) $stock ) {
-                    $product->set_manage_stock( true );
-                    $product->set_stock_quantity( $stock );
-                    $has_changes = true;
-                    $logger->info("CAMBIO DE STOCK para SKU [{$sku}]: de {$current_stock} a {$stock}", ['source' => 'bwi-sync']);
-                }
+        // --- SINCRONIZACIÓN DE STOCK ---
+        $stock_bsale = $this->get_stock_for_variant( $variant_id );
+        if ( is_wp_error( $stock_bsale ) ) {
+            $logger->error("Error al obtener stock para SKU [{$sku}]: " . $stock_bsale->get_error_message(), ['source' => 'bwi-sync']);
+        } else {
+            $stock_wc = (int) $product->get_stock_quantity();
+            $log_details[] = "Stock Bsale: {$stock_bsale} / Stock WooCommerce: {$stock_wc}";
+            if ( $stock_wc !== (int) $stock_bsale ) {
+                $product->set_manage_stock( true );
+                $product->set_stock_quantity( $stock_bsale );
+                $has_changes = true;
+                $log_details[] = "-> ¡Cambio de stock detectado!";
             }
-            
-            // --- SINCRONIZACIÓN DE PRECIOS (lógica nueva y eficiente) ---
-            $price_list_id = ! empty( $this->options['price_list_id'] ) ? absint($this->options['price_list_id']) : 0;
-            if ( $price_list_id > 0 ) {
-                $price = $this->get_price_from_cache( $variant_id, $price_list_id );
-                $current_price = (float) $product->get_regular_price();
-                if ( $price !== null && abs( $current_price - $price ) > 0.001 ) {
-                    $product->set_regular_price( $price );
-                    $has_changes = true;
-                    $logger->info("CAMBIO DE PRECIO para SKU [{$sku}]: de {$current_price} a {$price}", ['source' => 'bwi-sync']);
-                }
-            }
-            
-            if ( $has_changes ) {
-                $product->save();
-                $logger->info("ÉXITO: Producto SKU [{$sku}] guardado.", ['source' => 'bwi-sync']);
-            }
-
-        } catch ( Exception $e ) {
-            $logger->error( 'EXCEPCIÓN al procesar SKU ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-sync' ] );
         }
+        
+        // --- SINCRONIZACIÓN DE PRECIOS ---
+        $price_list_id = ! empty( $this->options['price_list_id'] ) ? absint($this->options['price_list_id']) : 0;
+        if ( $price_list_id > 0 ) {
+            $price_bsale = $this->get_price_from_cache( $variant_id, $price_list_id );
+            $price_wc = (float) $product->get_regular_price();
+            
+            if ( $price_bsale === null ) {
+                $log_details[] = "Precio Bsale: No encontrado en la lista / Precio WooCommerce: {$price_wc}";
+            } else {
+                $log_details[] = "Precio Bsale: {$price_bsale} / Precio WooCommerce: {$price_wc}";
+                // Comparamos precios con un margen pequeño para evitar problemas con decimales.
+                if ( abs( $price_wc - $price_bsale ) > 0.001 ) {
+                    $product->set_regular_price( $price_bsale );
+                    $has_changes = true;
+                    $log_details[] = "-> ¡Cambio de precio detectado!";
+                }
+            }
+        } else {
+            $log_details[] = "Sincronización de precios no activada.";
+        }
+        
+        // --- GUARDAR Y CONCLUIR ---
+        if ( $has_changes ) {
+            $product->save();
+            $logger->info("ÉXITO: Producto SKU [{$sku}] actualizado. Detalles: " . implode(' | ', $log_details), ['source' => 'bwi-sync']);
+        } else {
+            $logger->info("SIN CAMBIOS: No se requirió actualización para SKU [{$sku}]. Detalles: " . implode(' | ', $log_details), ['source' => 'bwi-sync']);
+        }
+
+    } catch ( Exception $e ) {
+        $logger->error( 'EXCEPCIÓN al procesar SKU ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-sync' ] );
     }
+}
 
     private function get_stock_for_variant( $variant_id ) {
         $office_id = ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 0;
@@ -221,39 +255,53 @@ final class BWI_Product_Sync {
      * NUEVO: Obtiene el precio de una variante desde una caché local de la lista de precios.
      */
     private function get_price_from_cache( $variant_id, $price_list_id ) {
-        $logger = wc_get_logger();
-        
-        if ( ! isset( self::$price_list_cache[$price_list_id] ) ) {
-            $logger->info("Caché de lista de precios [{$price_list_id}] no encontrada. Obteniendo de la API...", ['source' => 'bwi-sync']);
+    $logger = wc_get_logger();
+    $transient_key = 'bwi_price_list_cache_' . $price_list_id;
+
+    // Intentar obtener el mapa de precios desde la caché de WordPress (transient)
+    $price_map = get_transient( $transient_key );
+
+    if ( false === $price_map ) {
+        $logger->info("Caché de lista de precios [{$price_list_id}] no encontrada. Obteniendo de la API...", ['source' => 'bwi-sync']);
+        $price_map = [];
+        $offset = 0;
+        $limit = 50; // Máximo permitido por la API
+
+        do {
             $endpoint = sprintf('price_lists/%d/details.json', $price_list_id);
-            $response = $this->api_client->get( $endpoint, ['limit' => 500] );
+            $response = $this->api_client->get( $endpoint, ['limit' => $limit, 'offset' => $offset] );
 
             if ( is_wp_error( $response ) || empty( $response->items ) ) {
-                $logger->error("No se pudo obtener la lista de precios [{$price_list_id}] de Bsale.", ['source' => 'bwi-sync']);
-                self::$price_list_cache[$price_list_id] = false;
-                return null;
+                $logger->error("No se pudo obtener la lista de precios [{$price_list_id}] desde Bsale. Offset: {$offset}", ['source' => 'bwi-sync']);
+                // Si falla, guardamos un valor para no reintentar por un tiempo y salimos del bucle.
+                set_transient( $transient_key, [], 5 * MINUTE_IN_SECONDS );
+                break;
             }
 
-            $price_map = [];
             foreach( $response->items as $item ) {
-                if (isset($item->variant->id) && isset($item->value)) {
-                    $price_map[$item->variant->id] = (float) $item->value;
+                if (isset($item->variant->id) && isset($item->variantValueWithTaxes)) {
+                    // Usamos variantValueWithTaxes para obtener el precio final con impuestos.
+                    // Si necesitas el precio neto, usa: $item->variantValue
+                    $price_map[$item->variant->id] = (float) $item->variantValueWithTaxes;
                 }
             }
-            self::$price_list_cache[$price_list_id] = $price_map;
-            $logger->info("Lista de precios [{$price_list_id}] cargada y cacheada con " . count($price_map) . " precios.", ['source' => 'bwi-sync']);
-        }
+            
+            $offset += $limit;
 
-        if ( self::$price_list_cache[$price_list_id] === false ) return null;
-
-        if ( isset( self::$price_list_cache[$price_list_id][$variant_id] ) ) {
-            return self::$price_list_cache[$price_list_id][$variant_id];
-        }
-
-        $logger->warning("No se encontró el precio para la variante ID [{$variant_id}] en la caché de la lista de precios [{$price_list_id}].", ['source' => 'bwi-sync']);
-        return null;
+        } while ( isset($response->next) && !empty($response->next) );
+        
+        // Guardar el mapa de precios completo en la caché de WordPress por 1 hora.
+        set_transient( $transient_key, $price_map, HOUR_IN_SECONDS );
+        $logger->info("Lista de precios [{$price_list_id}] cargada y cacheada con " . count($price_map) . " precios.", ['source' => 'bwi-sync']);
     }
 
+    if ( isset( $price_map[$variant_id] ) ) {
+        return $price_map[$variant_id];
+    }
+
+    $logger->warning("No se encontró el precio para la variante ID [{$variant_id}] en la caché de la lista de precios [{$price_list_id}].", ['source' => 'bwi-sync']);
+    return null;
+}
 
         
     public function update_stock_from_webhook( $payload ) {
