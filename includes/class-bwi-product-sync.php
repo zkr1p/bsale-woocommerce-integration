@@ -84,6 +84,9 @@ final class BWI_Product_Sync {
         as_enqueue_async_action( 'bwi_sync_products_batch', [ 'offset' => 0 ], 'bwi-sync' );
     }
 
+    /**
+     * Procesa un lote de productos y encola el siguiente.
+     */
     public function process_sync_batch( $offset = 0 ) {
         $limit = 50;
         $logger = wc_get_logger();
@@ -95,9 +98,12 @@ final class BWI_Product_Sync {
             return;
         }
         foreach ( $response->items as $bsale_product ) {
-            if ( ! empty( $bsale_product->variants ) ) {
-                foreach ( $bsale_product->variants as $variant ) {
-                    as_enqueue_async_action( 'bwi_sync_single_variant', [ 'variant_data' => $variant, 'product_data' => $bsale_product ], 'bwi-sync' );
+            // Convertimos los objetos a arrays ANTES de encolarlos para consistencia.
+            $product_data_array = json_decode(json_encode($bsale_product), true);
+            if ( ! empty( $bsale_product->variants ) && ! empty( $bsale_product->variants->items ) ) {
+                foreach ( $bsale_product->variants->items as $variant ) {
+                    $variant_data_array = json_decode(json_encode($variant), true);
+                    as_enqueue_async_action( 'bwi_sync_single_variant', [ 'variant_data' => $variant_data_array, 'product_data' => $product_data_array ], 'bwi-sync' );
                 }
             }
         }
@@ -112,23 +118,30 @@ final class BWI_Product_Sync {
      */
     public function update_product_from_variant( $variant_data, $product_data ) {
         $logger = wc_get_logger();
-        $sku = $variant_data->code;
+        
+        // LÓGICA DEFENSIVA: Accedemos a los datos como si fueran un array.
+        $sku = isset($variant_data['code']) ? $variant_data['code'] : null;
+        $product_name_from_bsale = isset($product_data['name']) ? $product_data['name'] : 'Producto sin nombre';
+
         $logger->info( "--- Iniciando procesamiento para SKU de Bsale: [{$sku}] ---", [ 'source' => 'bwi-sync' ] );
+
         if ( empty( $sku ) ) {
-            $logger->warning( "PROCESO DETENIDO: Variante de Bsale sin SKU. Producto padre: " . $product_data->name, [ 'source' => 'bwi-sync' ] );
+            $logger->warning( "PROCESO DETENIDO: Variante de Bsale sin SKU. Producto padre: " . $product_name_from_bsale, [ 'source' => 'bwi-sync' ] );
             return;
         }
+
         $product_id = wc_get_product_id_by_sku( $sku );
         if ( ! $product_id ) {
             $logger->info( "OMITIENDO: No se encontró producto en WooCommerce con SKU [{$sku}].", [ 'source' => 'bwi-sync' ] );
             return;
         }
+
         try {
             $product = wc_get_product( $product_id );
             $logger->info( "Producto encontrado en WC: '{$product->get_name()}' (ID: {$product_id}).", [ 'source' => 'bwi-sync' ] );
             $has_changes = false;
-            $logger->info( "Sincronización de stock activada para SKU [{$sku}]. Obteniendo stock de Bsale...", [ 'source' => 'bwi-sync' ] );
-            $stock = $this->get_stock_for_variant( $variant_data->id );
+            
+            $stock = $this->get_stock_for_variant( $variant_data['id'] );
             if ( is_wp_error( $stock ) ) {
                 $logger->error( "API ERROR al obtener stock para SKU [{$sku}]: " . $stock->get_error_message(), [ 'source' => 'bwi-sync' ] );
             } else {
@@ -143,12 +156,14 @@ final class BWI_Product_Sync {
                     $logger->info( "No se detectaron cambios de stock para SKU [{$sku}].", [ 'source' => 'bwi-sync' ] );
                 }
             }
+            
             if ( $has_changes ) {
                 $product->save();
                 $logger->info( "ÉXITO: Producto SKU [{$sku}] guardado en la base de datos.", [ 'source' => 'bwi-sync' ] );
             } else {
                 $logger->info( "No hubo cambios que guardar para el producto SKU [{$sku}].", [ 'source' => 'bwi-sync' ] );
             }
+
         } catch ( Exception $e ) {
             $logger->error( 'EXCEPCIÓN al procesar SKU ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-sync' ] );
         }
