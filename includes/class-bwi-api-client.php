@@ -64,6 +64,9 @@ final class BWI_API_Client {
      * @param array  $body     El cuerpo de la solicitud para POST/PUT.
      * @return mixed|WP_Error  El cuerpo de la respuesta decodificado o un objeto WP_Error en caso de fallo.
      */
+    
+
+    /*
     private function request( $method, $endpoint, $body = [] ) {
         if ( empty( $this->access_token ) ) {
             return new WP_Error( 'bwi_api_error', 'El Access Token de Bsale no está configurado en wp-config.php (BWI_ACCESS_TOKEN).' );
@@ -79,14 +82,14 @@ final class BWI_API_Client {
             ],
             'timeout' => 30,
         ];
-        
+
         if ( ! empty( $body ) ) {
             $args['body'] = wp_json_encode( $body );
         }
         /*
         if ( ! empty( $body ) && in_array( strtoupper($method), ['POST', 'PUT'] ) ) {
             $args['body'] = wp_json_encode( $body );
-        }*/
+        }
 
         // Usamos la API HTTP de WordPress para realizar la solicitud.
         $response = wp_remote_request( $request_url, $args );
@@ -113,18 +116,70 @@ final class BWI_API_Client {
     }
 
     /**
+     * Realiza una solicitud a la API de Bsale, ahora con soporte para diferentes versiones.
+     */
+    private function request( $method, $endpoint, $body = [], $version = 'v1' ) {
+        if ( empty( $this->access_token ) ) {
+            return new WP_Error( 'bwi_api_error', 'El Access Token de Bsale no está configurado en wp-config.php.' );
+        }
+
+        // Construye la URL base dinámicamente según la versión solicitada.
+        $base_url = 'https://api.bsale.io/' . $version . '/';
+        $request_url = $base_url . ltrim($endpoint, '/');
+
+        $args = [
+            'method'  => strtoupper($method),
+            'headers' => [
+                'Content-Type' => 'application/json',
+                'access_token' => $this->access_token,
+            ],
+            'timeout' => 30,
+        ];
+
+        if ( ! empty( $body ) ) {
+            $args['body'] = wp_json_encode( $body );
+        }
+
+        $response = wp_remote_request( $request_url, $args );
+
+        if ( is_wp_error( $response ) ) return $response;
+        
+        $response_code = wp_remote_retrieve_response_code( $response );
+        $response_body = wp_remote_retrieve_body( $response );
+        $decoded_body  = json_decode( $response_body );
+
+        if ( $response_code >= 400 ) {
+            $error_message = isset($decoded_body->error) ? $decoded_body->error : 'Error desconocido de la API.';
+            return new WP_Error( 'bwi_api_error', "Error {$response_code} en [{$request_url}]: {$error_message}", [ 'status' => $response_code ] );
+        }
+
+        return $decoded_body;
+    }
+
+    
+    /**
      * Método público para obtener productos desde Bsale.
      *
      * @param array $params Parámetros de consulta (ej. limit, offset).
      * @return mixed|WP_Error
      */
+    /**
+     * Realiza una solicitud GET a una versión específica de la API.
+     */
+    public function get( $endpoint, $params = [], $version = 'v1' ) {
+        if ( ! empty( $params ) ) {
+            $endpoint .= '?' . http_build_query( $params );
+        }
+        return $this->request( 'GET', $endpoint, [], $version );
+    }
+    /*
     public function get( $endpoint, $params = [] ) {
         if ( ! empty( $params ) ) {
             $endpoint .= '?' . http_build_query( $params );
         }
         return $this->request( 'GET', $endpoint );
     }
-
+    */
     /**
      * Método público para crear un documento en Bsale.
      *
@@ -153,8 +208,16 @@ final class BWI_API_Client {
     
     // --- Aquí se pueden añadir más métodos públicos para otros endpoints ---
     // ej. get_clients(), get_document_types(), etc.
+    /*
     public function post( $endpoint, $data ) {
         return $this->request( 'POST', $endpoint, $data );
+    }
+        */
+    /**
+     * Realiza una solicitud POST a una versión específica de la API.
+     */
+    public function post( $endpoint, $data, $version = 'v1' ) {
+        return $this->request( 'POST', $endpoint, $data, $version );
     }
     /**
      * NUEVO: Envía una solicitud para crear una devolución (Nota de Crédito).

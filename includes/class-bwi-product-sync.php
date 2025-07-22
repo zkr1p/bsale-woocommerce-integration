@@ -264,6 +264,37 @@ final class BWI_Product_Sync {
         $office_id = ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 0;
         
         if ( empty( $office_id ) ) {
+            return new WP_Error('config_error', 'No hay una sucursal configurada para la sincronización de stock.');
+        }
+
+        $params = [
+            'variantid' => $variant_id,
+            'officeid'  => $office_id
+        ];
+        
+        $logger->info( "Consultando stock en Bsale para variantid: [{$variant_id}] en officeid: [{$office_id}]", [ 'source' => 'bwi-sync' ] );
+        $response = $this->api_client->get( 'stocks.json', $params );
+
+        if ( is_wp_error( $response ) ) {
+            // El error ya se registra en el cliente de la API, aquí solo lo devolvemos.
+            return $response;
+        }
+
+        if ( ! empty( $response->items ) ) {
+            $stock = (int) $response->items[0]->quantityAvailable;
+            $logger->info( "Respuesta de API: Stock encontrado para la variante ID [{$variant_id}] es {$stock}.", [ 'source' => 'bwi-sync' ] );
+            return $stock;
+        }
+
+        $logger->info( "Respuesta de API: No se encontró una entrada de stock para la variante ID [{$variant_id}] en la sucursal [{$office_id}]. Asumiendo stock 0.", [ 'source' => 'bwi-sync' ] );
+        return 0;
+    }
+    /*
+    private function get_stock_for_variant( $variant_id ) {
+        $logger = wc_get_logger();
+        $office_id = ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 0;
+        
+        if ( empty( $office_id ) ) {
             $logger->warning( "No se puede obtener stock para la variante ID [{$variant_id}] porque no hay una sucursal configurada.", [ 'source' => 'bwi-sync' ] );
             return 0;
         }
@@ -292,6 +323,8 @@ final class BWI_Product_Sync {
         $logger->info( "Respuesta de API: No se encontró una entrada de stock para la variante ID [{$variant_id}] en la sucursal [{$office_id}]. Asumiendo stock 0.", [ 'source' => 'bwi-sync' ] );
         return 0; // Si la API no devuelve items, asumimos que el stock es 0.
     }
+        */
+
 
     /**
      * Obtiene el precio de una variante desde una lista de precios específica.
