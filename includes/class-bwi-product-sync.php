@@ -260,22 +260,37 @@ final class BWI_Product_Sync {
      * @return int|WP_Error El stock total o un error.
      */
     private function get_stock_for_variant( $variant_id ) {
+        $logger = wc_get_logger();
         $office_id = ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 0;
+        
         if ( empty( $office_id ) ) {
-            return 0; // Si no hay sucursal configurada, el stock es 0.
+            $logger->warning( "No se puede obtener stock para la variante ID [{$variant_id}] porque no hay una sucursal configurada.", [ 'source' => 'bwi-sync' ] );
+            return 0;
         }
 
+        //Usamos 'variantid' en lugar de 'code'.
         $params = [
             'variantid' => $variant_id,
             'officeid'  => $office_id
         ];
+        
+        $logger->info( "Consultando stock en Bsale para variantid: [{$variant_id}] en officeid: [{$office_id}]", [ 'source' => 'bwi-sync' ] );
         $response = $this->api_client->get( 'stocks.json', $params );
 
-        if ( ! is_wp_error( $response ) && ! empty( $response->items ) ) {
-            return $response->items[0]->quantityAvailable;
+        if ( is_wp_error( $response ) ) {
+            $logger->error( "API ERROR al obtener stock para la variante ID [{$variant_id}]: " . $response->get_error_message(), [ 'source' => 'bwi-sync' ] );
+            return $response;
         }
 
-        return 0;
+        if ( ! empty( $response->items ) ) {
+            // La documentación confirma que el campo es 'quantityAvailable'.
+            $stock = (int) $response->items[0]->quantityAvailable;
+            $logger->info( "Respuesta de API: Stock encontrado para la variante ID [{$variant_id}] es {$stock}.", [ 'source' => 'bwi-sync' ] );
+            return $stock;
+        }
+
+        $logger->info( "Respuesta de API: No se encontró una entrada de stock para la variante ID [{$variant_id}] en la sucursal [{$office_id}]. Asumiendo stock 0.", [ 'source' => 'bwi-sync' ] );
+        return 0; // Si la API no devuelve items, asumimos que el stock es 0.
     }
 
     /**

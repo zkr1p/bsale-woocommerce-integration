@@ -79,10 +79,14 @@ final class BWI_API_Client {
             ],
             'timeout' => 30,
         ];
-
-        if ( ! empty( $body ) && in_array( strtoupper($method), ['POST', 'PUT'] ) ) {
+        
+        if ( ! empty( $body ) ) {
             $args['body'] = wp_json_encode( $body );
         }
+        /*
+        if ( ! empty( $body ) && in_array( strtoupper($method), ['POST', 'PUT'] ) ) {
+            $args['body'] = wp_json_encode( $body );
+        }*/
 
         // Usamos la API HTTP de WordPress para realizar la solicitud.
         $response = wp_remote_request( $request_url, $args );
