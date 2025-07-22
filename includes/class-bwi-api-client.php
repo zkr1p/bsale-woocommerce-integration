@@ -118,15 +118,11 @@ final class BWI_API_Client {
     /**
      * Realiza una solicitud a la API de Bsale, ahora con soporte para diferentes versiones.
      */
-    private function request( $method, $endpoint, $body = [], $version = 'v1' ) {
+    private function request( $method, $endpoint, $body = [] ) {
         if ( empty( $this->access_token ) ) {
             return new WP_Error( 'bwi_api_error', 'El Access Token de Bsale no está configurado en wp-config.php.' );
         }
-
-        // Construye la URL base dinámicamente según la versión solicitada.
-        $base_url = 'https://api.bsale.io/' . $version . '/';
-        $request_url = $base_url . ltrim($endpoint, '/');
-
+        $request_url = $this->api_url . ltrim($endpoint, '/');
         $args = [
             'method'  => strtoupper($method),
             'headers' => [
@@ -135,24 +131,18 @@ final class BWI_API_Client {
             ],
             'timeout' => 30,
         ];
-
         if ( ! empty( $body ) ) {
             $args['body'] = wp_json_encode( $body );
         }
-
         $response = wp_remote_request( $request_url, $args );
-
         if ( is_wp_error( $response ) ) return $response;
-        
         $response_code = wp_remote_retrieve_response_code( $response );
         $response_body = wp_remote_retrieve_body( $response );
         $decoded_body  = json_decode( $response_body );
-
         if ( $response_code >= 400 ) {
-            $error_message = isset($decoded_body->error) ? $decoded_body->error : 'Error desconocido de la API.';
-            return new WP_Error( 'bwi_api_error', "Error {$response_code} en [{$request_url}]: {$error_message}", [ 'status' => $response_code ] );
+            $error_message = isset($decoded_body->error) ? $decoded_body->error : 'Error desconocido';
+            return new WP_Error( 'bwi_api_error', "Error {$response_code}: {$error_message}", [ 'status' => $response_code ] );
         }
-
         return $decoded_body;
     }
 
@@ -166,20 +156,13 @@ final class BWI_API_Client {
     /**
      * Realiza una solicitud GET a una versión específica de la API.
      */
-    public function get( $endpoint, $params = [], $version = 'v1' ) {
-        if ( ! empty( $params ) ) {
-            $endpoint .= '?' . http_build_query( $params );
-        }
-        return $this->request( 'GET', $endpoint, [], $version );
-    }
-    /*
     public function get( $endpoint, $params = [] ) {
         if ( ! empty( $params ) ) {
             $endpoint .= '?' . http_build_query( $params );
         }
         return $this->request( 'GET', $endpoint );
     }
-    */
+    
     /**
      * Método público para crear un documento en Bsale.
      *
@@ -216,8 +199,8 @@ final class BWI_API_Client {
     /**
      * Realiza una solicitud POST a una versión específica de la API.
      */
-    public function post( $endpoint, $data, $version = 'v1' ) {
-        return $this->request( 'POST', $endpoint, $data, $version );
+    public function post( $endpoint, $data ) {
+        return $this->request( 'POST', $endpoint, $data );
     }
     /**
      * NUEVO: Envía una solicitud para crear una devolución (Nota de Crédito).

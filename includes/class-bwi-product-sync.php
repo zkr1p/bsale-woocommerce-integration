@@ -67,7 +67,7 @@ final class BWI_Product_Sync {
     public function handle_manual_sync() {
         check_ajax_referer( 'bwi_manual_sync_nonce', 'security' );
 
-        // MEJORA DE SEGURIDAD: Verificar que solo los administradores puedan ejecutar esta acción.
+        //Verificar que solo los administradores puedan ejecutar esta acción.
         if ( ! current_user_can( 'manage_options' ) ) {
             wp_send_json_error( [ 'message' => 'No tienes permisos suficientes para realizar esta acción.' ], 403 );
         }
@@ -85,28 +85,22 @@ final class BWI_Product_Sync {
     }
 
     public function process_sync_batch( $offset = 0 ) {
-        $limit = 50; // Máximo permitido por la API de Bsale.
+        $limit = 50;
         $logger = wc_get_logger();
         $logger->info( "Procesando lote de productos. Offset: {$offset}", [ 'source' => 'bwi-sync' ] );
-
-        $params = [ 'limit' => $limit, 'offset' => $offset, 'expand' => 'variants' ];
+        $params = [ 'limit' => $limit, 'offset' => $offset, 'expand' => '[variants]' ];
         $response = $this->api_client->get( 'products.json', $params );
-
         if ( is_wp_error( $response ) || empty( $response->items ) ) {
-            $logger->info( 'Fin de la sincronización masiva o error en la API. No se programarán más lotes.', [ 'source' => 'bwi-sync' ] );
+            $logger->info( '== FIN DE SINCRONIZACIÓN MASIVA ==', [ 'source' => 'bwi-sync' ] );
             return;
         }
-
         foreach ( $response->items as $bsale_product ) {
-            if ( ! empty( $bsale_product->variants->items ) ) {
-                foreach ( $bsale_product->variants->items as $variant ) {
-                    // Encolar una tarea individual para cada variante.
+            if ( ! empty( $bsale_product->variants ) ) {
+                foreach ( $bsale_product->variants as $variant ) {
                     as_enqueue_async_action( 'bwi_sync_single_variant', [ 'variant_data' => $variant, 'product_data' => $bsale_product ], 'bwi-sync' );
                 }
             }
         }
-
-        // Programar el siguiente lote para que se procese.
         as_enqueue_async_action( 'bwi_sync_products_batch', [ 'offset' => $offset + $limit ], 'bwi-sync' );
     }
     
@@ -119,52 +113,44 @@ final class BWI_Product_Sync {
     public function update_product_from_variant( $variant_data, $product_data ) {
         $logger = wc_get_logger();
         $sku = $variant_data->code;
-
+        $logger->info( "--- Iniciando procesamiento para SKU de Bsale: [{$sku}] ---", [ 'source' => 'bwi-sync' ] );
         if ( empty( $sku ) ) {
-            return; // Omitir variantes sin SKU en Bsale.
-        }
-
-        $product_id = wc_get_product_id_by_sku( $sku );
-
-        // LÓGICA MODIFICADA: Si no se encuentra el producto, no hacer nada.
-        if ( ! $product_id ) {
-            $logger->info( "Omitiendo: SKU '{$sku}' de Bsale no encontrado en WooCommerce.", [ 'source' => 'bwi-sync' ] );
+            $logger->warning( "PROCESO DETENIDO: Variante de Bsale sin SKU. Producto padre: " . $product_data->name, [ 'source' => 'bwi-sync' ] );
             return;
         }
-
+        $product_id = wc_get_product_id_by_sku( $sku );
+        if ( ! $product_id ) {
+            $logger->info( "OMITIENDO: No se encontró producto en WooCommerce con SKU [{$sku}].", [ 'source' => 'bwi-sync' ] );
+            return;
+        }
         try {
             $product = wc_get_product( $product_id );
+            $logger->info( "Producto encontrado en WC: '{$product->get_name()}' (ID: {$product_id}).", [ 'source' => 'bwi-sync' ] );
             $has_changes = false;
-
-            // 1. Sincronizar Stock (si está activado)
-            if ( ! empty( $this->options['enable_stock_sync'] ) ) {
-                $stock = $this->get_stock_for_variant( $variant_data->id );
-                if ( ! is_wp_error( $stock ) && $product->get_stock_quantity() !== $stock ) {
+            $logger->info( "Sincronización de stock activada para SKU [{$sku}]. Obteniendo stock de Bsale...", [ 'source' => 'bwi-sync' ] );
+            $stock = $this->get_stock_for_variant( $variant_data->id );
+            if ( is_wp_error( $stock ) ) {
+                $logger->error( "API ERROR al obtener stock para SKU [{$sku}]: " . $stock->get_error_message(), [ 'source' => 'bwi-sync' ] );
+            } else {
+                $current_stock = $product->get_stock_quantity();
+                $logger->info( "Stock actual en WC: {$current_stock}. Stock obtenido de Bsale: {$stock}.", [ 'source' => 'bwi-sync' ] );
+                if ( (int) $current_stock !== (int) $stock ) {
                     $product->set_manage_stock( true );
                     $product->set_stock_quantity( $stock );
                     $has_changes = true;
+                    $logger->info( "CAMBIO DETECTADO: El stock para SKU [{$sku}] será actualizado a {$stock}.", [ 'source' => 'bwi-sync' ] );
+                } else {
+                    $logger->info( "No se detectaron cambios de stock para SKU [{$sku}].", [ 'source' => 'bwi-sync' ] );
                 }
             }
-            
-            // 2. NUEVO: Sincronizar Precio (si hay una lista configurada)
-            $price_list_id = ! empty( $this->options['price_list_id'] ) ? absint($this->options['price_list_id']) : 0;
-            if ( $price_list_id > 0 ) {
-                $price = $this->get_price_for_variant( $variant_data->id, $price_list_id );
-                // Usamos una comparación de floats segura.
-                if ( ! is_wp_error( $price ) && abs( (float)$product->get_regular_price() - $price ) > 0.001 ) {
-                    $product->set_regular_price( $price );
-                    $has_changes = true;
-                }
-            }
-
-            // Guardar solo si hubo cambios para optimizar el rendimiento.
             if ( $has_changes ) {
                 $product->save();
-                $logger->info( "Producto actualizado: {$product->get_name()} (SKU: {$sku})", [ 'source' => 'bwi-sync' ] );
+                $logger->info( "ÉXITO: Producto SKU [{$sku}] guardado en la base de datos.", [ 'source' => 'bwi-sync' ] );
+            } else {
+                $logger->info( "No hubo cambios que guardar para el producto SKU [{$sku}].", [ 'source' => 'bwi-sync' ] );
             }
-
         } catch ( Exception $e ) {
-            $logger->error( 'Error al actualizar producto ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-sync' ] );
+            $logger->error( 'EXCEPCIÓN al procesar SKU ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-sync' ] );
         }
     }
     /*
@@ -262,31 +248,21 @@ final class BWI_Product_Sync {
     private function get_stock_for_variant( $variant_id ) {
         $logger = wc_get_logger();
         $office_id = ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 0;
-        
         if ( empty( $office_id ) ) {
-            return new WP_Error('config_error', 'No hay una sucursal configurada para la sincronización de stock.');
+            return new WP_Error('config_error', 'No hay una sucursal configurada.');
         }
-
-        $params = [
-            'variantid' => $variant_id,
-            'officeid'  => $office_id
-        ];
-        
+        $params = [ 'variantid' => $variant_id, 'officeid'  => $office_id ];
         $logger->info( "Consultando stock en Bsale para variantid: [{$variant_id}] en officeid: [{$office_id}]", [ 'source' => 'bwi-sync' ] );
         $response = $this->api_client->get( 'stocks.json', $params );
-
         if ( is_wp_error( $response ) ) {
-            // El error ya se registra en el cliente de la API, aquí solo lo devolvemos.
             return $response;
         }
-
         if ( ! empty( $response->items ) ) {
             $stock = (int) $response->items[0]->quantityAvailable;
             $logger->info( "Respuesta de API: Stock encontrado para la variante ID [{$variant_id}] es {$stock}.", [ 'source' => 'bwi-sync' ] );
             return $stock;
         }
-
-        $logger->info( "Respuesta de API: No se encontró una entrada de stock para la variante ID [{$variant_id}] en la sucursal [{$office_id}]. Asumiendo stock 0.", [ 'source' => 'bwi-sync' ] );
+        $logger->info( "Respuesta de API: No se encontró entrada de stock para la variante ID [{$variant_id}]. Asumiendo stock 0.", [ 'source' => 'bwi-sync' ] );
         return 0;
     }
     /*
