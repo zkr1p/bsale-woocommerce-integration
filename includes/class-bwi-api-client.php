@@ -12,7 +12,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * BWI_API_Client Class
+ * Cliente para la comunicación con la API de Bsale.
+ *
+ * Esta clase sigue el patrón Singleton para asegurar una única instancia y maneja
+ * todas las solicitudes HTTP (GET, POST, etc.) hacia la API de Bsale,
+ * incluyendo la autenticación y el manejo de errores.
+ *
+ * @package Bsale_WooCommerce_Integration
  */
 final class BWI_API_Client {
 
@@ -57,66 +63,13 @@ final class BWI_API_Client {
     }
 
     /**
-     * Método central y privado que maneja toda la comunicación.
+     * Método central que maneja toda la comunicación con la API de Bsale.
+     * Construye y ejecuta la solicitud HTTP usando las funciones de WordPress.
      *
      * @param string $method   El método HTTP (GET, POST, PUT, DELETE).
      * @param string $endpoint El endpoint de la API al que se llama (ej. 'documents.json').
-     * @param array  $body     El cuerpo de la solicitud para POST/PUT.
-     * @return mixed|WP_Error  El cuerpo de la respuesta decodificado o un objeto WP_Error en caso de fallo.
-     */
-    
-
-    /*
-    private function request( $method, $endpoint, $body = [] ) {
-        if ( empty( $this->access_token ) ) {
-            return new WP_Error( 'bwi_api_error', 'El Access Token de Bsale no está configurado en wp-config.php (BWI_ACCESS_TOKEN).' );
-        }
-
-        $request_url = $this->api_url . ltrim($endpoint, '/');
-
-        $args = [
-            'method'  => strtoupper($method),
-            'headers' => [
-                'Content-Type' => 'application/json',
-                'access_token' => $this->access_token,
-            ],
-            'timeout' => 30,
-        ];
-
-        if ( ! empty( $body ) ) {
-            $args['body'] = wp_json_encode( $body );
-        }
-        /*
-        if ( ! empty( $body ) && in_array( strtoupper($method), ['POST', 'PUT'] ) ) {
-            $args['body'] = wp_json_encode( $body );
-        }
-
-        // Usamos la API HTTP de WordPress para realizar la solicitud.
-        $response = wp_remote_request( $request_url, $args );
-
-        // Manejo de errores de conexión de WordPress.
-        if ( is_wp_error( $response ) ) {
-            return $response;
-        }
-
-        $response_code = wp_remote_retrieve_response_code( $response );
-        $response_body = wp_remote_retrieve_body( $response );
-        $decoded_body  = json_decode( $response_body );
-
-        // Manejo de errores devueltos por la API de Bsale (ej. 4xx, 5xx).
-        if ( $response_code >= 400 ) {
-            $error_message = 'Error desconocido de la API de Bsale.';
-            if ( isset( $decoded_body->error ) ) {
-                 $error_message = is_string($decoded_body->error) ? $decoded_body->error : 'La API devolvió un error inesperado.';
-            }
-            return new WP_Error( 'bwi_api_error', "Error {$response_code}: {$error_message}", [ 'status' => $response_code ] );
-        }
-
-        return $decoded_body;
-    }
-
-    /**
-     * Realiza una solicitud a la API de Bsale, ahora con soporte para diferentes versiones.
+     * @param array  $body     El cuerpo de la solicitud para métodos POST/PUT (opcional).
+     * @return object|WP_Error El cuerpo de la respuesta decodificado como un objeto, o un objeto WP_Error en caso de fallo.
      */
     private function request( $method, $endpoint, $body = [] ) {
         if ( empty( $this->access_token ) ) {
@@ -147,14 +100,12 @@ final class BWI_API_Client {
     }
 
     
-    /**
-     * Método público para obtener productos desde Bsale.
+     /**
+     * Realiza una solicitud GET a un endpoint de la API.
      *
-     * @param array $params Parámetros de consulta (ej. limit, offset).
-     * @return mixed|WP_Error
-     */
-    /**
-     * Realiza una solicitud GET a una versión específica de la API.
+     * @param string $endpoint El endpoint de la API (ej. 'products.json').
+     * @param array  $params   Un array de parámetros para añadir a la URL (opcional).
+     * @return object|WP_Error La respuesta de la API o un error.
      */
     public function get( $endpoint, $params = [] ) {
         if ( ! empty( $params ) ) {
@@ -189,21 +140,18 @@ final class BWI_API_Client {
         return $this->request( 'GET', $endpoint );
     }
     
-    // --- Aquí se pueden añadir más métodos públicos para otros endpoints ---
-    // ej. get_clients(), get_document_types(), etc.
-    /*
-    public function post( $endpoint, $data ) {
-        return $this->request( 'POST', $endpoint, $data );
-    }
-        */
     /**
-     * Realiza una solicitud POST a una versión específica de la API.
+     * Realiza una solicitud POST a un endpoint de la API.
+     *
+     * @param string $endpoint El endpoint de la API (ej. 'documents.json').
+     * @param array  $data     El cuerpo (payload) de la solicitud.
+     * @return object|WP_Error La respuesta de la API o un error.
      */
     public function post( $endpoint, $data ) {
         return $this->request( 'POST', $endpoint, $data );
     }
     /**
-     * NUEVO: Envía una solicitud para crear una devolución (Nota de Crédito).
+     * Envía una solicitud para crear una devolución (Nota de Crédito).
      *
      * @param array $data El payload para la devolución.
      * @return mixed|WP_Error

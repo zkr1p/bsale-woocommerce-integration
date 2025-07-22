@@ -3,7 +3,7 @@
  * Plugin Name:         Integración Bsale y WooCommerce - LOV
  * Plugin URI:          https://whydot.co
  * Description:         Sincroniza productos, stock, pedidos y facturación entre Bsale y WooCommerce basado en la documentación actualizada de la API de Bsale.
- * Version:             2.7.8
+ * Version:             2.7.9
  * Author:              WHYDOTCO
  * Author URI:          https://whydot.co
  * License:             GPLv2 or later
@@ -90,6 +90,10 @@ final class Bsale_WooCommerce_Integration {
             return;
         }
 
+        // --- INICIO DE LA MODIFICACIÓN ---
+        $this->load_textdomain();
+        // --- FIN DE LA MODIFICACIÓN ---
+
         // 2. Ahora que sabemos que WC está activo, cargamos nuestras dependencias.
         $this->load_dependencies();
 
@@ -97,6 +101,16 @@ final class Bsale_WooCommerce_Integration {
         $this->init_classes();
     }
 
+    /**
+     * Carga el text domain del plugin para la internacionalización.
+     */
+    public function load_textdomain() {
+        load_plugin_textdomain(
+            'bsale-woocommerce-integration-lov',
+            false,
+            dirname( plugin_basename( __FILE__ ) ) . '/languages'
+        );
+    }
     /**
      * Carga los archivos necesarios para el funcionamiento del plugin.
      */

@@ -124,12 +124,11 @@ final class BWI_Product_Sync {
     
     /**
      * Crea o actualiza un producto en WooCommerce basado en los datos de una variante de Bsale.
+     * Esta función es ejecutada de forma asíncrona por Action Scheduler.
      *
-     * @param object $variant_data Datos de la variante de Bsale.
-     * @param object $product_data Datos del producto padre de Bsale.
-     */
-     /**
-     * Actualiza un producto existente en WooCommerce (lógica restaurada y mejorada).
+     * @param array  $variant_data Los datos de la variante de Bsale (como array).
+     * @param string $product_name El nombre del producto padre en Bsale (para logging).
+     * @return void
      */
     public function update_product_from_variant( $variant_data, $product_name ) {
     $logger = wc_get_logger();
@@ -252,7 +251,13 @@ final class BWI_Product_Sync {
     }
     
     /**
-     * NUEVO: Obtiene el precio de una variante desde una caché local de la lista de precios.
+     * Obtiene el precio de una variante desde una caché local o la API de Bsale.
+     * Maneja la paginación de la API para obtener la lista de precios completa y la almacena
+     * en un 'transient' de WordPress para optimizar las solicitudes futuras.
+     *
+     * @param int $variant_id    El ID de la variante de Bsale.
+     * @param int $price_list_id El ID de la lista de precios de Bsale.
+     * @return float|null        El precio final (con impuestos) de la variante, o null si no se encuentra.
      */
     private function get_price_from_cache( $variant_id, $price_list_id ) {
     $logger = wc_get_logger();
@@ -281,7 +286,7 @@ final class BWI_Product_Sync {
             foreach( $response->items as $item ) {
                 if (isset($item->variant->id) && isset($item->variantValueWithTaxes)) {
                     // Usamos variantValueWithTaxes para obtener el precio final con impuestos.
-                    // Si necesitas el precio neto, usa: $item->variantValue
+                    // Si necesitas el precio neto, usar: $item->variantValue
                     $price_map[$item->variant->id] = (float) $item->variantValueWithTaxes;
                 }
             }

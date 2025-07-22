@@ -165,20 +165,9 @@ final class BWI_Admin {
         $options = get_option('bwi_options');
         $selected_office_id = isset($options['office_id_stock']) ? $options['office_id_stock'] : '';
 
-        // MEJORA: Crear una clave de caché dinámica.
+        // Usamos nuestra nueva función de ayuda
         $transient_key = 'bwi_offices_' . substr(md5($this->access_token), 0, 12);
-        $offices = get_transient($transient_key);
-
-        if ( false === $offices ) {
-            $api_client = BWI_API_Client::get_instance();
-            $response = $api_client->get('offices.json');
-            
-            $offices = [];
-            if ( !is_wp_error($response) && !empty($response->items) ) {
-                $offices = $response->items;
-                set_transient( $transient_key, $offices, 12 * HOUR_IN_SECONDS );
-            }
-        }
+        $offices = $this->get_bsale_items_with_cache('offices.json', $transient_key);
 
         echo '<select name="bwi_options[office_id_stock]">';
         if ( !empty($offices) ) {
@@ -191,10 +180,10 @@ final class BWI_Admin {
                 );
             }
         } else {
-            echo '<option value="">No se pudieron cargar las sucursales.</option>';
+            echo '<option value="">No se pudieron cargar las sucursales desde Bsale.</option>';
         }
         echo '</select>';
-        echo '<p class="description">Seleccione la sucursal de Bsale de la cual se descontará el stock.</p>';
+        echo '<p class="description">Seleccione la sucursal de Bsale de la cual se tomará el stock para sincronizar.</p>';
     }
     /**
      * Renderiza el campo para seleccionar la Lista de Precios.
@@ -203,34 +192,25 @@ final class BWI_Admin {
         $options = get_option('bwi_options');
         $selected_list_id = isset($options['price_list_id']) ? $options['price_list_id'] : '';
 
-        // MEJORA: Crear una clave de caché dinámica.
+        // Usamos la misma función de ayuda, pero para otro endpoint
         $transient_key = 'bwi_active_price_lists_' . substr(md5($this->access_token), 0, 12);
-        $price_lists = get_transient($transient_key);
-
-        if ( false === $price_lists ) {
-            $api_client = BWI_API_Client::get_instance();
-            $response = $api_client->get('price_lists.json', ['state' => 0]);
-            
-            $price_lists = [];
-            if ( !is_wp_error($response) && !empty($response->items) ) {
-                $price_lists = $response->items;
-                set_transient( $transient_key, $price_lists, 12 * HOUR_IN_SECONDS );
-            }
-        }
+        $price_lists = $this->get_bsale_items_with_cache('price_lists.json', $transient_key, ['state' => 0]);
 
         echo '<select name="bwi_options[price_list_id]">';
         if ( !empty($price_lists) ) {
             echo '<option value="">-- No sincronizar precios --</option>';
             foreach ( $price_lists as $list ) {
                 printf(
-                    '<option value="%d" %s>%s</option>',
+                    '<option value="%d" %s>%s (%s)</option>',
                     esc_attr($list->id),
                     selected($selected_list_id, $list->id, false),
-                    esc_html($list->name)
+                    esc_html($list->name),
+                    // Añadimos el símbolo de la moneda para mayor claridad
+                    esc_html($list->coin->symbol)
                 );
             }
         } else {
-            echo '<option value="">No se pudieron cargar las listas de precios activas.</option>';
+            echo '<option value="">No se pudieron cargar las listas de precios activas desde Bsale.</option>';
         }
         echo '</select>';
         echo '<p class="description">Seleccione la lista de precios de Bsale que se usará para actualizar los precios en WooCommerce.</p>';
@@ -299,6 +279,33 @@ final class BWI_Admin {
         
         return $new_input;
     }
+
+    /**
+     * Función de ayuda para obtener datos desde la API de Bsale con caché (transient).
+     * Centraliza la lógica de obtener y cachear listas para evitar código repetido.
+     *
+     * @param string $endpoint      La ruta de la API (ej. 'offices.json').
+     * @param string $transient_key El nombre único para la caché de esta lista.
+     * @param array  $params        Parámetros adicionales para la solicitud a la API.
+     * @return array                Una lista de items obtenidos de la API, o un array vacío si falla.
+     */
+    private function get_bsale_items_with_cache( $endpoint, $transient_key, $params = [] ) {
+        $items = get_transient( $transient_key );
+
+        if ( false === $items ) {
+            $api_client = BWI_API_Client::get_instance();
+            $response = $api_client->get( $endpoint, $params );
+            
+            $items = []; // Por defecto, un array vacío
+            if ( ! is_wp_error( $response ) && ! empty( $response->items ) ) {
+                $items = $response->items;
+                // Guardamos en caché por 12 horas.
+                set_transient( $transient_key, $items, 12 * HOUR_IN_SECONDS );
+            }
+        }
+        return $items;
+    }
+
     /**
      * Encola el script JS para la página de administración.
      */

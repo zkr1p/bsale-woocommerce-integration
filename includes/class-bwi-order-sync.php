@@ -14,7 +14,8 @@ if ( ! defined( 'ABSPATH' ) ) {
  * BWI_Order_Sync Class
  */
 final class BWI_Order_Sync {
-
+    private const BSALE_BOLETA_CODE_SII = 39;
+    private const BSALE_FACTURA_CODE_SII = 33;
     /** Instancia única de la clase. */
     private static $instance;
 
@@ -132,7 +133,7 @@ final class BWI_Order_Sync {
 
         // LÓGICA DE FACTURA
         if ( 'factura' === $document_type ) {
-            $code_sii = ! empty( $this->options['factura_codesii'] ) ? absint($this->options['factura_codesii']) : 33;
+            $code_sii = ! empty( $this->options['factura_codesii'] ) ? absint($this->options['factura_codesii']) : self::BSALE_FACTURA_CODE_SII;
             
             // Usamos los campos fiscales personalizados que creamos.
             $client_data = [
@@ -149,7 +150,7 @@ final class BWI_Order_Sync {
         } 
         // LÓGICA DE BOLETA
         else {
-            $code_sii = ! empty( $this->options['boleta_codesii'] ) ? absint($this->options['boleta_codesii']) : 39;
+            $code_sii = ! empty( $this->options['boleta_codesii'] ) ? absint($this->options['boleta_codesii']) : self::BSALE_BOLETA_CODE_SII;
             
             // Para boleta, usamos los datos de facturación de WC (que son los de envío).
             $client_data = [
