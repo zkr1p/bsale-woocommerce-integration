@@ -46,7 +46,7 @@ final class BWI_Product_Sync {
         
         // Hooks para las tareas en segundo plano
         add_action( 'bwi_sync_products_batch', [ $this, 'process_sync_batch' ], 10, 1 );
-        add_action( 'bwi_sync_single_variant', [ $this, 'update_or_create_product_from_variant' ], 10, 2 );
+        add_action( 'bwi_sync_single_variant', [ $this, 'update_product_from_variant' ], 10, 2 );
 
         if ( ! wp_next_scheduled( 'bwi_cron_sync_products' ) ) {
             wp_schedule_event( time(), 'hourly', 'bwi_cron_sync_products' );
