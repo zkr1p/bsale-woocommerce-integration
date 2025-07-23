@@ -211,19 +211,21 @@ final class BWI_Admin {
 
         // Usamos la misma función de ayuda, pero para otro endpoint
         $transient_key = 'bwi_active_price_lists_' . substr(md5($this->access_token), 0, 12);
-        $price_lists = $this->get_bsale_items_with_cache('price_lists.json', $transient_key, ['state' => 0]);
+        $price_lists = $this->get_bsale_items_with_cache('price_lists.json', $transient_key, ['state' => 0, 'expand' => 'coin']);
 
         echo '<select name="bwi_options[price_list_id]">';
         if ( !empty($price_lists) ) {
             echo '<option value="">-- No sincronizar precios --</option>';
             foreach ( $price_lists as $list ) {
+                // CORRECIÓN: Verificamos que el objeto coin y symbol existan antes de usarlos.
+                $currency_symbol = isset($list->coin, $list->coin->symbol) ? ' (' . esc_html($list->coin->symbol) . ')' : '';
+                
                 printf(
-                    '<option value="%d" %s>%s (%s)</option>',
+                    '<option value="%d" %s>%s%s</option>',
                     esc_attr($list->id),
                     selected($selected_list_id, $list->id, false),
                     esc_html($list->name),
-                    // Añadimos el símbolo de la moneda para mayor claridad
-                    esc_html($list->coin->symbol)
+                    $currency_symbol
                 );
             }
         } else {
