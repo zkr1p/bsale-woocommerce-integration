@@ -87,8 +87,16 @@ final class BWI_Product_Sync {
         $limit = 50; // Máximo permitido por la API
         $logger = wc_get_logger();
         $logger->info( "Procesando lote de productos. Offset: {$offset}", [ 'source' => 'bwi-sync' ] );
-
+        $this->options = get_option( 'bwi_options' );
+        $product_type_id_sync = ! empty( $this->options['product_type_id_sync'] ) ? absint($this->options['product_type_id_sync']) : 0;
+        $log_message = "Procesando lote de productos. Offset: {$offset}.";
         $params = [ 'limit' => $limit, 'offset' => $offset, 'expand' => '[variants]' ];
+        // Si se ha seleccionado un tipo de producto, lo añadimos como filtro a la llamada API.
+        if ( $product_type_id_sync > 0 ) {
+            $params['producttypeid'] = $product_type_id_sync;
+            $log_message .= " Filtrando por Tipo de Producto ID: {$product_type_id_sync}.";
+        }
+        $logger->info( $log_message, [ 'source' => 'bwi-sync' ] );
         $response = $this->api_client->get( 'products.json', $params );
 
         if ( is_wp_error( $response ) ) {
@@ -312,35 +320,53 @@ final class BWI_Product_Sync {
     public function update_stock_from_webhook( $payload ) {
         $logger = wc_get_logger();
 
-        if ( ! isset( $payload['resource'] ) ) {
-            $logger->warning( 'Payload de webhook de stock sin la clave "resource".', [ 'source' => 'bwi-webhooks' ] );
+        if ( ! isset( $payload['resourceId'] ) ) {
+            $logger->warning( 'Webhook de stock sin resourceId (variantId).', [ 'source' => 'bwi-webhooks' ] );
             return;
         }
 
-        // El webhook notifica un recurso de la API. Hacemos una llamada GET para obtener los detalles completos.
-        $stock_details = $this->api_client->get( $payload['resource'] );
+        $variant_id_webhook = absint($payload['resourceId']);
+        
+        // Cargar las opciones del plugin para acceder al filtro
+        $this->options = get_option( 'bwi_options' );
+        $product_type_id_sync = ! empty( $this->options['product_type_id_sync'] ) ? absint($this->options['product_type_id_sync']) : 0;
 
-        if ( is_wp_error( $stock_details ) || ! isset( $stock_details->variant->code ) ) {
-            $logger->error( 'No se pudieron obtener los detalles del stock desde el webhook.', [ 'source' => 'bwi-webhooks', 'resource' => $payload['resource'] ] );
+        // Obtener detalles completos de la variante para verificar su tipo y obtener el SKU
+        $variant_details = $this->api_client->get("variants/{$variant_id_webhook}.json", ['expand' => '[product]']);
+
+        if ( is_wp_error( $variant_details ) || empty( $variant_details->code ) ) {
+            $logger->error( "Error de Webhook de Stock: No se pudo obtener detalles para la variante Bsale ID [{$variant_id_webhook}].", [ 'source' => 'bwi-webhooks' ] );
             return;
         }
 
-        $sku = sanitize_text_field( $stock_details->variant->code );
-        $quantity = intval( $stock_details->quantityAvailable );
-
+        // Si hay un filtro activo, verificar si el tipo de producto coincide
+        if ( $product_type_id_sync > 0 && isset($variant_details->product->product_type->id) ) {
+            $variant_product_type_id = absint($variant_details->product->product_type->id);
+            if ($variant_product_type_id !== $product_type_id_sync) {
+                $logger->info( "Webhook de Stock ignorado: La variante [{$variant_details->code}] pertenece al tipo de producto [{$variant_product_type_id}], que no es el tipo [{$product_type_id_sync}] configurado para sincronizar.", [ 'source' => 'bwi-webhooks' ] );
+                return;
+            }
+        }
+        
+        $sku = sanitize_text_field( $variant_details->code );
         $product_id = wc_get_product_id_by_sku( $sku );
 
         if ( $product_id ) {
-            try {
-                $product = wc_get_product( $product_id );
-                $product->set_stock_quantity( $quantity );
-                $product->save();
-                $logger->info( "Stock actualizado por webhook para SKU {$sku}. Nueva cantidad: {$quantity}", [ 'source' => 'bwi-webhooks' ] );
-            } catch ( Exception $e ) {
-                $logger->error( 'Error al actualizar stock por webhook para SKU ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-webhooks' ] );
+             // Ahora obtenemos el stock específico usando la URL del payload
+            $stock_details = $this->api_client->get( ltrim( $payload['resource'], '/' ) );
+            if ( !is_wp_error($stock_details) && isset($stock_details->quantityAvailable) ) {
+                try {
+                    $product = wc_get_product( $product_id );
+                    $quantity = intval( $stock_details->quantityAvailable );
+                    $product->set_stock_quantity( $quantity );
+                    $product->save();
+                    $logger->info( "ÉXITO Webhook: Stock actualizado para SKU {$sku}. Nueva cantidad: {$quantity}", [ 'source' => 'bwi-webhooks' ] );
+                } catch ( Exception $e ) {
+                    $logger->error( 'EXCEPCIÓN en Webhook de Stock para SKU ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-webhooks' ] );
+                }
             }
         } else {
-            $logger->info( "Webhook de stock recibido para SKU {$sku}, pero no se encontró el producto en WooCommerce.", [ 'source' => 'bwi-webhooks' ] );
+            $logger->info( "Webhook de Stock recibido para SKU {$sku}, pero no se encontró el producto en WooCommerce.", [ 'source' => 'bwi-webhooks' ] );
         }
     }
 
@@ -353,32 +379,39 @@ final class BWI_Product_Sync {
         $logger = wc_get_logger();
         $price_list_id_webhook = isset( $payload['priceListId'] ) ? absint( $payload['priceListId'] ) : 0;
         $variant_id_webhook = isset( $payload['resourceId'] ) ? absint( $payload['resourceId'] ) : 0;
+        
+        $this->options = get_option( 'bwi_options' );
         $price_list_id_settings = ! empty( $this->options['price_list_id'] ) ? absint( $this->options['price_list_id'] ) : 0;
+        $product_type_id_sync = ! empty( $this->options['product_type_id_sync'] ) ? absint($this->options['product_type_id_sync']) : 0;
 
-        // 1. Verificar si el cambio de precio corresponde a la lista que usamos en la tienda.
         if ( ! $price_list_id_webhook || $price_list_id_webhook !== $price_list_id_settings ) {
             $logger->info( "Webhook de precio ignorado: La lista [{$price_list_id_webhook}] no es la configurada [{$price_list_id_settings}].", [ 'source' => 'bwi-webhooks' ] );
             return;
         }
 
-        // 2. Obtener el SKU de la variante desde la API de Bsale.
-        $variant_details = $this->api_client->get( "variants/{$variant_id_webhook}.json" );
+        $variant_details = $this->api_client->get("variants/{$variant_id_webhook}.json", ['expand' => '[product]']);
         if ( is_wp_error( $variant_details ) || empty( $variant_details->code ) ) {
-            $logger->error( "Error de Webhook: No se pudo obtener el SKU para la variante Bsale ID [{$variant_id_webhook}].", [ 'source' => 'bwi-webhooks' ] );
+            $logger->error( "Error de Webhook de Precio: No se pudo obtener el SKU para la variante Bsale ID [{$variant_id_webhook}].", [ 'source' => 'bwi-webhooks' ] );
             return;
         }
-        $sku = $variant_details->code;
+        
+        if ( $product_type_id_sync > 0 && isset($variant_details->product->product_type->id) ) {
+            $variant_product_type_id = absint($variant_details->product->product_type->id);
+            if ($variant_product_type_id !== $product_type_id_sync) {
+                $logger->info( "Webhook de Precio ignorado: La variante [{$variant_details->code}] pertenece al tipo de producto [{$variant_product_type_id}], que no es el tipo [{$product_type_id_sync}] configurado para sincronizar.", [ 'source' => 'bwi-webhooks' ] );
+                return;
+            }
+        }
 
-        // 3. Encontrar el producto en WooCommerce por SKU.
+        $sku = $variant_details->code;
         $product_id = wc_get_product_id_by_sku( $sku );
         if ( ! $product_id ) {
-            $logger->info( "Webhook de precio ignorado: No se encontró producto en WooCommerce con SKU [{$sku}].", [ 'source' => 'bwi-webhooks' ] );
+            $logger->info( "Webhook de Precio ignorado: No se encontró producto en WooCommerce con SKU [{$sku}].", [ 'source' => 'bwi-webhooks' ] );
             return;
         }
 
-        // 4. Obtener el detalle del precio nuevo desde la URL que nos dio el webhook.
         $price_details = $this->api_client->get( ltrim( $payload['resource'], '/' ) );
-        if ( is_wp_error( $price_details ) || empty( $price_details->items[0]->variantValueWithTaxes ) ) {
+        if ( is_wp_error( $price_details ) || !isset( $price_details->items[0]->variantValueWithTaxes ) ) {
             $logger->error( "Error de Webhook: No se pudo obtener el nuevo precio para la variante Bsale ID [{$variant_id_webhook}].", [ 'source' => 'bwi-webhooks' ] );
             return;
         }
@@ -386,12 +419,9 @@ final class BWI_Product_Sync {
         try {
             $product = wc_get_product( $product_id );
             $new_price = (float) $price_details->items[0]->variantValueWithTaxes;
-            
             $product->set_regular_price( $new_price );
             $product->save();
-            
             $logger->info( "ÉXITO Webhook: Precio actualizado para SKU [{$sku}]. Nuevo precio: {$new_price}", [ 'source' => 'bwi-webhooks' ] );
-
         } catch ( Exception $e ) {
             $logger->error( 'EXCEPCIÓN en Webhook de Precio para SKU ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-webhooks' ] );
         }

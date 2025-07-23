@@ -96,6 +96,8 @@ final class BWI_Admin {
         add_settings_field( 'bwi_office_id_stock', 'Sucursal para Stock', [ $this, 'render_office_id_stock_field' ], 'bwi_settings', 'bwi_sync_settings_section' );
         // NUEVO CAMPO: Lista de Precios
         add_settings_field( 'bwi_price_list_id', 'Lista de Precios', [ $this, 'render_price_list_id_field' ], 'bwi_settings', 'bwi_sync_settings_section' );
+        // NUEVO CAMPO: Tipo de Producto a Sincronizar
+        add_settings_field( 'bwi_product_type_id_sync', 'Sincronizar solo el Tipo de Producto', [ $this, 'render_product_type_id_sync_field' ], 'bwi_settings', 'bwi_sync_settings_section' );
         
         // --- SECCIÓN: Facturación ---
         add_settings_section( 'bwi_billing_settings_section', 'Facturación y Documentos', null, 'bwi_settings' );
@@ -156,18 +158,18 @@ final class BWI_Admin {
     }
 
     public function render_webhook_url_field() {
-    $secret = defined('BWI_WEBHOOK_SECRET') ? BWI_WEBHOOK_SECRET : '';
-    if (empty($secret)) {
-        echo '<p class="description" style="color: red;">Defina el secreto del Webhook en wp-config.php para generar la URL.</p>';
-        return;
-    }
+        $secret = defined('BWI_WEBHOOK_SECRET') ? BWI_WEBHOOK_SECRET : '';
+        if (empty($secret)) {
+            echo '<p class="description" style="color: red;">Defina el secreto del Webhook en wp-config.php para generar la URL.</p>';
+            return;
+        }
 
-    // Construir la URL con el token en la ruta, sin parámetros.
-    $webhook_url = get_rest_url( null, 'bwi/v1/webhook/' . $secret );
-    
-    echo '<input type="text" value="' . esc_url( $webhook_url ) . '" readonly class="large-text code">';
-    echo '<p class="description">Copia esta URL y pégala en la configuración de webhooks de Bsale.</p>';
-}
+        // Construir la URL con el token en la ruta, sin parámetros.
+        $webhook_url = get_rest_url( null, 'bwi/v1/webhook/' . $secret );
+        
+        echo '<input type="text" value="' . esc_url( $webhook_url ) . '" readonly class="large-text code">';
+        echo '<p class="description">Copia esta URL y pégala en la configuración de webhooks de Bsale.</p>';
+    }
     public function render_access_token_field() { 
         $options = get_option( 'bwi_options' );
         $value = isset( $options['access_token'] ) ? $options['access_token'] : '';
@@ -182,22 +184,47 @@ final class BWI_Admin {
         $options = get_option('bwi_options');
         $selected_office_id = isset($options['office_id_stock']) ? $options['office_id_stock'] : '';
 
-        // Usamos nuestra nueva función de ayuda
-        $transient_key = 'bwi_offices_' . substr(md5($this->access_token), 0, 12);
+        // Obtenemos todas las sucursales (activas e inactivas) para no perder ninguna.
+        $transient_key = 'bwi_all_offices_' . substr(md5($this->access_token), 0, 12);
         $offices = $this->get_bsale_items_with_cache('offices.json', $transient_key);
+
+        $office_id_1_found = false;
+        if (!empty($offices)) {
+            foreach ($offices as $office) {
+                if (isset($office->id) && $office->id == 1) {
+                    $office_id_1_found = true;
+                    break;
+                }
+            }
+        }
+
+        // Si la Sucursal Base (ID 1) no vino en la lista de la API, la añadimos manualmente.
+        if (!$office_id_1_found) {
+            $base_office = new stdClass();
+            $base_office->id = 1;
+            $base_office->name = 'Sucursal Base (Casa Matriz)';
+            $base_office->state = 0; // Asumimos que está activa.
+            array_unshift($offices, $base_office);
+        }
 
         echo '<select name="bwi_options[office_id_stock]">';
         if ( !empty($offices) ) {
             foreach ( $offices as $office ) {
+                // Añadimos una etiqueta "(Inactiva)" a las sucursales que no están activas para mayor claridad.
+                $status_label = (isset($office->state) && $office->state != 0) ? ' (Inactiva)' : '';
+                
+                // --- LÍNEA CORREGIDA ---
                 printf(
-                    '<option value="%d" %s>%s</option>',
+                    '<option value="%d" %s>%s%s</option>',
                     esc_attr($office->id),
                     selected($selected_office_id, $office->id, false),
-                    esc_html($office->name)
+                    esc_html($office->name),
+                    esc_html($status_label) // La variable se añade aquí como un argumento más.
                 );
             }
         } else {
-            echo '<option value="">No se pudieron cargar las sucursales desde Bsale.</option>';
+            // Si la API no devuelve nada, al menos mostramos la opción Base.
+            echo '<option value="1">Sucursal Base (Casa Matriz)</option>';
         }
         echo '</select>';
         echo '<p class="description">Seleccione la sucursal de Bsale de la cual se tomará el stock para sincronizar.</p>';
@@ -333,6 +360,35 @@ final class BWI_Admin {
         echo '</select>';
         echo '<p class="description">Selecciona la forma de pago en Bsale que corresponde a <strong>' . esc_html($gateway->get_title()) . '</strong>.</p>';
     }
+    /**
+     * Renderiza el campo para seleccionar el Tipo de Producto a sincronizar.
+     */
+    public function render_product_type_id_sync_field() {
+        $options = get_option('bwi_options');
+        $selected_type_id = isset($options['product_type_id_sync']) ? $options['product_type_id_sync'] : '';
+
+        // Usamos nuestra función de ayuda para obtener los tipos de producto de Bsale
+        $transient_key = 'bwi_product_types_' . substr(md5($this->access_token), 0, 12);
+        $product_types = $this->get_bsale_items_with_cache('product_types.json', $transient_key, ['state' => 0]);
+
+        echo '<select name="bwi_options[product_type_id_sync]">';
+        echo '<option value="">-- Sincronizar Todos --</option>'; // Opción para no filtrar
+
+        if ( !empty($product_types) ) {
+            foreach ( $product_types as $type ) {
+                printf(
+                    '<option value="%d" %s>%s</option>',
+                    esc_attr($type->id),
+                    selected($selected_type_id, $type->id, false),
+                    esc_html($type->name)
+                );
+            }
+        } else {
+            echo '<option value="">No se pudieron cargar los tipos de producto.</option>';
+        }
+        echo '</select>';
+        echo '<p class="description">Seleccione un tipo de producto para limitar la sincronización solo a los productos de esa categoría. <strong>Recomendado si tiene muchos productos.</strong></p>';
+    }
     
     public function sanitize_options( $input ) {
         $new_input = [];
@@ -343,6 +399,7 @@ final class BWI_Admin {
         if ( isset( $input['trigger_status'] ) ) $new_input['trigger_status'] = sanitize_text_field( $input['trigger_status'] );
         if ( isset( $input['boleta_codesii'] ) ) $new_input['boleta_codesii'] = absint( $input['boleta_codesii'] );
         if ( isset( $input['factura_codesii'] ) ) $new_input['factura_codesii'] = absint( $input['factura_codesii'] );
+        if ( isset( $input['product_type_id_sync'] ) ) $new_input['product_type_id_sync'] = absint( $input['product_type_id_sync'] );
         // Recorrer todas las posibles claves de mapeo y guardarlas si existen.
         foreach ( $input as $key => $value ) {
             if ( strpos( $key, 'payment_map_' ) === 0 ) {

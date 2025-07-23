@@ -75,7 +75,15 @@ final class BWI_API_Client {
         if ( empty( $this->access_token ) ) {
             return new WP_Error( 'bwi_api_error', 'El Access Token de Bsale no está configurado en wp-config.php.' );
         }
-        $request_url = $this->api_url . ltrim($endpoint, '/');
+        $request_url = '';
+        // Revisa si el endpoint es una ruta completa que ya incluye una versión (ej. /v2/...)
+        if ( preg_match('/^\/v[0-9]+\//', $endpoint) ) {
+            // Si es así, usa el dominio base y la ruta completa del webhook.
+            $request_url = 'https://api.bsale.io' . $endpoint;
+        } else {
+            // Si no, es una ruta relativa y usamos la URL base v1 por defecto.
+            $request_url = $this->api_url . ltrim($endpoint, '/');
+        }
         $args = [
             'method'  => strtoupper($method),
             'headers' => [
