@@ -131,11 +131,11 @@ final class BWI_Order_Sync {
     private function build_bsale_payload( $order ) {
         $document_type = $order->get_meta( '_bwi_document_type' );
 
+        // ... (toda la lógica para $client_data se mantiene igual) ...
+        
         // LÓGICA DE FACTURA
         if ( 'factura' === $document_type ) {
             $code_sii = ! empty( $this->options['factura_codesii'] ) ? absint($this->options['factura_codesii']) : self::BSALE_FACTURA_CODE_SII;
-            
-            // Usamos los campos fiscales personalizados que creamos.
             $client_data = [
                 'code'           => $order->get_meta( '_bwi_billing_rut' ),
                 'company'        => $order->get_meta( '_bwi_billing_company_name' ),
@@ -143,16 +143,14 @@ final class BWI_Order_Sync {
                 'address'        => $order->get_meta( '_bwi_fiscal_address' ),
                 'municipality'   => $order->get_meta( '_bwi_fiscal_municipality' ),
                 'city'           => $order->get_meta( '_bwi_fiscal_city' ),
-                'email'          => $order->get_billing_email(), // El email de contacto se mantiene
-                'phone'          => $order->get_billing_phone(),   // El teléfono de contacto se mantiene
+                'email'          => $order->get_billing_email(),
+                'phone'          => $order->get_billing_phone(),
                 'companyOrPerson' => 1,
             ];
         } 
         // LÓGICA DE BOLETA
         else {
             $code_sii = ! empty( $this->options['boleta_codesii'] ) ? absint($this->options['boleta_codesii']) : self::BSALE_BOLETA_CODE_SII;
-            
-            // Para boleta, usamos los datos de facturación de WC (que son los de envío).
             $client_data = [
                 'code'           => '1-9',
                 'company'        => $order->get_formatted_billing_full_name(),
@@ -166,6 +164,11 @@ final class BWI_Order_Sync {
         }
 
         $details = [];
+        // --- INICIO DE LA MODIFICACIÓN ---
+        // ID del impuesto IVA en Bsale. Generalmente es 1. Lo definimos como un string "[1]".
+        $bsale_tax_id_array = '[1]';
+        // --- FIN DE LA MODIFICACIÓN ---
+
         foreach ( $order->get_items() as $item ) {
             $product = $item->get_product();
             $sku = $product->get_sku();
@@ -178,20 +181,21 @@ final class BWI_Order_Sync {
                 'code'         => $sku,
                 'quantity'     => $item->get_quantity(),
                 'netUnitValue' => wc_get_price_excluding_tax( $product, [ 'qty' => 1 ] ),
+                'taxId'        => $bsale_tax_id_array, // <-- CAMBIO: Se añade el ID del impuesto
             ];
         }
 
         // Añadir el envío como una línea de detalle si existe.
-        if ( $order->get_shipping_total() > 0 ) {
+        if ( (float) $order->get_shipping_total() > 0 ) {
             $details[] = [
-                'comment' => 'Costo de Envío: ' . $order->get_shipping_method(),
-                'quantity' => 1,
-                'netUnitValue' => wc_get_price_excluding_tax( $order, ['price' => $order->get_shipping_total()] ),
+                'comment'      => 'Costo de Envío: ' . $order->get_shipping_method(),
+                'quantity'     => 1,
+                'netUnitValue' => (float) $order->get_shipping_total(), // <-- CAMBIO: Se usa el valor de envío correcto
+                'taxId'        => $bsale_tax_id_array, // <-- CAMBIO: Se añade el ID del impuesto
             ];
         }
 
         $payload = [
-            'salesId'      => $order->get_order_key(),
             'codeSii'      => $code_sii,
             'officeId'     => ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 1,
             'priceListId'  => ! empty( $this->options['price_list_id'] ) ? absint($this->options['price_list_id']) : 1,
@@ -200,19 +204,19 @@ final class BWI_Order_Sync {
             'details'      => $details,
         ];
 
-        // Obtiene el ID de la forma de pago por defecto de Bsale (generalmente 1 es "Efectivo")
-        $default_payment_id = 1;
-        // NOTA: Para una integración más avanzada, podrías crear un mapeo en los ajustes
-        // entre las pasarelas de pago de WooCommerce y los IDs de las formas de pago en Bsale.
-        // Por ahora, asignaremos el total a la forma de pago por defecto.
-
-        $payload['payments'] = [
-            [
-                'paymentTypeId' => $default_payment_id,
-                'amount'        => $order->get_total(),
-                'recordDate'    => $order->get_date_paid() ? $order->get_date_paid()->getTimestamp() : time(),
-            ]
-        ];
+        // Añadir información de pago
+        $payment_map_key = 'payment_map_' . $order->get_payment_method();
+        $bsale_payment_type_id = isset( $this->options[$payment_map_key] ) ? absint( $this->options[$payment_map_key] ) : 0;
+        
+        if ( $bsale_payment_type_id > 0 ) {
+            $payload['payments'] = [
+                [
+                    'paymentTypeId' => $bsale_payment_type_id,
+                    'amount'        => $order->get_total(),
+                    'recordDate'    => $order->get_date_paid() ? $order->get_date_paid()->getTimestamp() : time(),
+                ]
+            ];
+        }
 
         return $payload;
     }

@@ -79,53 +79,47 @@ final class BWI_Webhooks {
         return new WP_REST_Response( [ 'status' => 'success', 'message' => 'Webhook recibido y encolado.' ], 200 );
     }
 
-    /*
-    // Hook para procesar el webhook en segundo plano
-    add_action( 'bwi_process_webhook_payload', function( $payload ) {
-        $logger = wc_get_logger();
-        $logger->info( 'Procesando payload de webhook en segundo plano.', [ 'source' => 'bwi-webhooks' ] );
-
-        switch ( $payload['topic'] ) {
-            case 'stock.update': // Este es un ejemplo, el topic real puede variar.
-                // Aquí iría la lógica de BWI_Product_Sync para actualizar el stock de un producto.
-                // BWI_Product_Sync::get_instance()->update_stock_from_webhook($payload);
-                break;
-            // Añadir más casos para otros topics.
-        }
-    });
     /**
-     * Procesa una actualización de stock notificada por un webhook.
+     * Procesa una actualización notificada por un webhook.
+     * Esta función es ejecutada por Action Scheduler en segundo plano.
      *
      * @param array $payload El payload del webhook.
      */
     public function process_webhook_payload( $payload ) {
         $logger = wc_get_logger();
-        $logger->info( 'Procesando payload de webhook en segundo plano.', [ 'source' => 'bwi-webhooks' ] );
 
         if ( ! isset( $payload['topic'] ) ) {
+            $logger->warning( 'Payload de webhook inválido: no contiene "topic".', [ 'source' => 'bwi-webhooks' ] );
             return;
         }
 
-        switch ( $payload['topic'] ) {
-            case 'stock.update': // Asumiendo que Bsale usa este topic.
+        $topic = $payload['topic'];
+        $logger->info( "Procesando webhook para el tópico: '{$topic}'", [ 'source' => 'bwi-webhooks' ] );
+
+        switch ( $topic ) {
+            // --- INICIO DE LA CORRECCIÓN ---
+            // Añadimos el caso para 'stock' que es el que envía Bsale.
+            case 'stock':
+            // --- FIN DE LA CORRECCIÓN ---
+            case 'stock.update':
             case 'stock.created':
-                // Llamamos a la nueva función en la clase de sincronización de productos.
                 BWI_Product_Sync::get_instance()->update_stock_from_webhook( $payload );
                 break;
-
+            
             case 'price':
-                // Solo nos interesan las actualizaciones ('put')
                 if ( isset($payload['action']) && $payload['action'] === 'put' ) {
                     BWI_Product_Sync::get_instance()->update_price_from_webhook( $payload );
                 }
                 break;
-                
+
             case 'document.created':
                 // Aquí podríamos añadir lógica para, por ejemplo, actualizar el estado de un pedido.
                 // BWI_Order_Sync::get_instance()->update_order_from_webhook($payload);
                 break;
             
-            // Añadir más casos para otros topics (ej. product.update, client.created, etc.).
+            default:
+                $logger->info( "Webhook recibido para el tópico '{$topic}', pero no hay una acción configurada para él.", [ 'source' => 'bwi-webhooks' ] );
+                break;
         }
     }
 
