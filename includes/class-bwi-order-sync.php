@@ -177,21 +177,25 @@ final class BWI_Order_Sync {
                 return new WP_Error( 'missing_sku', 'El producto "' . $product->get_name() . '" no tiene un SKU y no puede ser facturado.' );
             }
 
+            // Usamos el total del item, que ya incluye el IVA.
+            $total_item_price = (float) $item->get_total() + (float) $item->get_total_tax();
+
             $details[] = [
-                'code'         => $sku,
-                'quantity'     => $item->get_quantity(),
-                'netUnitValue' => wc_get_price_excluding_tax( $product, [ 'qty' => 1 ] ),
-                'taxId'        => $bsale_tax_id_array, // <-- CAMBIO: Se añade el ID del impuesto
+                'code'           => $sku,
+                'quantity'       => $item->get_quantity(),
+                'totalUnitValue' => $total_item_price / $item->get_quantity(), // Enviamos el VALOR TOTAL UNITARIO
             ];
         }
 
         // Añadir el envío como una línea de detalle si existe.
         if ( (float) $order->get_shipping_total() > 0 ) {
+            // Usamos el total del envío, que ya incluye el IVA.
+            $total_shipping_price = (float) $order->get_shipping_total() + (float) $order->get_shipping_tax();
+
             $details[] = [
-                'comment'      => 'Costo de Envío: ' . $order->get_shipping_method(),
-                'quantity'     => 1,
-                'netUnitValue' => (float) $order->get_shipping_total(), // <-- CAMBIO: Se usa el valor de envío correcto
-                'taxId'        => $bsale_tax_id_array, // <-- CAMBIO: Se añade el ID del impuesto
+                'comment'        => 'Costo de Envío: ' . $order->get_shipping_method(),
+                'quantity'       => 1,
+                'totalUnitValue' => $total_shipping_price, // Enviamos el VALOR TOTAL del envío
             ];
         }
 
