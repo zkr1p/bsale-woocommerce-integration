@@ -112,7 +112,14 @@ final class BWI_Webhooks {
                 // Llamamos a la nueva función en la clase de sincronización de productos.
                 BWI_Product_Sync::get_instance()->update_stock_from_webhook( $payload );
                 break;
-            
+
+            case 'price':
+                // Solo nos interesan las actualizaciones ('put')
+                if ( isset($payload['action']) && $payload['action'] === 'put' ) {
+                    BWI_Product_Sync::get_instance()->update_price_from_webhook( $payload );
+                }
+                break;
+                
             case 'document.created':
                 // Aquí podríamos añadir lógica para, por ejemplo, actualizar el estado de un pedido.
                 // BWI_Order_Sync::get_instance()->update_order_from_webhook($payload);
