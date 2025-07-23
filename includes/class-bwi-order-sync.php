@@ -200,6 +200,20 @@ final class BWI_Order_Sync {
             'details'      => $details,
         ];
 
+        // Obtiene el ID de la forma de pago por defecto de Bsale (generalmente 1 es "Efectivo")
+        $default_payment_id = 1;
+        // NOTA: Para una integración más avanzada, podrías crear un mapeo en los ajustes
+        // entre las pasarelas de pago de WooCommerce y los IDs de las formas de pago en Bsale.
+        // Por ahora, asignaremos el total a la forma de pago por defecto.
+
+        $payload['payments'] = [
+            [
+                'paymentTypeId' => $default_payment_id,
+                'amount'        => $order->get_total(),
+                'recordDate'    => $order->get_date_paid() ? $order->get_date_paid()->getTimestamp() : time(),
+            ]
+        ];
+
         return $payload;
     }
     /**
