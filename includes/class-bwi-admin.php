@@ -111,6 +111,23 @@ final class BWI_Admin {
         // --- SECCIÓN: Acciones Manuales ---
         add_settings_section( 'bwi_manual_actions_section', 'Acciones Manuales', null, 'bwi_settings' );
         add_settings_field( 'bwi_manual_sync_button', 'Sincronización Manual', [ $this, 'render_manual_sync_button_field' ], 'bwi_settings', 'bwi_manual_actions_section' );
+
+        // --- SECCIÓN: Mapeo de Pagos ---
+        add_settings_section( 'bwi_payment_mapping_section', 'Mapeo de Formas de Pago', [ $this, 'render_payment_mapping_description' ], 'bwi_settings' );
+
+        // Obtener las pasarelas de pago activas en WooCommerce
+        $payment_gateways = WC()->payment_gateways->get_available_payment_gateways();
+
+        foreach ( $payment_gateways as $gateway ) {
+            add_settings_field(
+                'bwi_payment_map_' . $gateway->id, // ID único para cada campo
+                $gateway->get_title(), // Nombre de la pasarela (ej. "Transferencia Bancaria")
+                [ $this, 'render_payment_gateway_mapping_field' ],
+                'bwi_settings',
+                'bwi_payment_mapping_section',
+                [ 'gateway' => $gateway ] // Pasamos el objeto de la pasarela a la función de renderizado
+            );
+        }
     }
 
     /**
@@ -267,6 +284,54 @@ final class BWI_Admin {
         echo '<input type="number" name="bwi_options[factura_codesii]" value="' . esc_attr( $value ) . '" class="small-text">';
         echo '<p class="description">Introduce el código SII para Facturas Electrónicas. Generalmente es <strong>33</strong>.</p>'; }
     
+    /**
+     * Muestra una descripción para la sección de mapeo de pagos.
+     */
+    public function render_payment_mapping_description() {
+        echo '<p>' . esc_html__( 'Asocia cada forma de pago de WooCommerce con su equivalente en Bsale. Esto asegurará que los documentos en Bsale se registren con la forma de pago correcta.', 'bsale-woocommerce-integration' ) . '</p>';
+    }
+
+    /**
+     * Muestra un campo de selección (dropdown) para mapear una pasarela de pago de WC a una de Bsale.
+     *
+     * @param array $args Argumentos pasados desde add_settings_field, incluyendo la pasarela de pago.
+     */
+    public function render_payment_gateway_mapping_field( $args ) {
+        $gateway = $args['gateway'];
+        $options = get_option( 'bwi_options' );
+        // El valor guardado para esta pasarela específica
+        $selected_bsale_id = isset( $options['payment_map_' . $gateway->id] ) ? $options['payment_map_' . $gateway->id] : '';
+
+        // Obtener las formas de pago de Bsale usando nuestra función de ayuda
+        $transient_key = 'bwi_payment_types_' . substr(md5($this->access_token), 0, 12);
+        $bsale_payment_types = $this->get_bsale_items_with_cache('payment_types.json', $transient_key);
+
+        // Nombre del campo en el array de opciones
+        $field_name = 'bwi_options[payment_map_' . $gateway->id . ']';
+
+        echo '<select name="' . esc_attr( $field_name ) . '">';
+        // Opción por defecto para no asignar un pago
+        echo '<option value="">-- No registrar pago --</option>';
+
+        if ( !empty($bsale_payment_types) ) {
+            foreach ( $bsale_payment_types as $bsale_type ) {
+                // Solo mostrar las formas de pago activas en Bsale
+                if ( $bsale_type->state === 0 ) {
+                    printf(
+                        '<option value="%d" %s>%s</option>',
+                        esc_attr($bsale_type->id),
+                        selected($selected_bsale_id, $bsale_type->id, false),
+                        esc_html($bsale_type->name)
+                    );
+                }
+            }
+        } else {
+            echo '<option value="">-- No se pudieron cargar las formas de pago de Bsale --</option>';
+        }
+        echo '</select>';
+        echo '<p class="description">Selecciona la forma de pago en Bsale que corresponde a <strong>' . esc_html($gateway->get_title()) . '</strong>.</p>';
+    }
+    
     public function sanitize_options( $input ) {
         $new_input = [];
         // Las credenciales ya no se guardan aquí.
@@ -276,7 +341,12 @@ final class BWI_Admin {
         if ( isset( $input['trigger_status'] ) ) $new_input['trigger_status'] = sanitize_text_field( $input['trigger_status'] );
         if ( isset( $input['boleta_codesii'] ) ) $new_input['boleta_codesii'] = absint( $input['boleta_codesii'] );
         if ( isset( $input['factura_codesii'] ) ) $new_input['factura_codesii'] = absint( $input['factura_codesii'] );
-        
+        // Recorrer todas las posibles claves de mapeo y guardarlas si existen.
+        foreach ( $input as $key => $value ) {
+            if ( strpos( $key, 'payment_map_' ) === 0 ) {
+                $new_input[$key] = sanitize_text_field( $value );
+            }
+        }
         return $new_input;
     }
 
