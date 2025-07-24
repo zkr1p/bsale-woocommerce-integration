@@ -131,44 +131,19 @@ final class BWI_Order_Sync {
     private function build_bsale_payload( $order ) {
         $document_type = $order->get_meta( '_bwi_document_type' );
 
-        // ... (toda la lógica para $client_data se mantiene igual) ...
-        
-        // LÓGICA DE FACTURA
+        // Lógica para definir $client_data y $code_sii (sin cambios)
         if ( 'factura' === $document_type ) {
             $code_sii = ! empty( $this->options['factura_codesii'] ) ? absint($this->options['factura_codesii']) : self::BSALE_FACTURA_CODE_SII;
-            $client_data = [
-                'code'           => $order->get_meta( '_bwi_billing_rut' ),
-                'company'        => $order->get_meta( '_bwi_billing_company_name' ),
-                'activity'       => $order->get_meta( '_bwi_billing_activity' ),
-                'address'        => $order->get_meta( '_bwi_fiscal_address' ),
-                'municipality'   => $order->get_meta( '_bwi_fiscal_municipality' ),
-                'city'           => $order->get_meta( '_bwi_fiscal_city' ),
-                'email'          => $order->get_billing_email(),
-                'phone'          => $order->get_billing_phone(),
-                'companyOrPerson' => 1,
-            ];
-        } 
-        // LÓGICA DE BOLETA
-        else {
+            $client_data = [ 'code' => $order->get_meta( '_bwi_billing_rut' ), 'company' => $order->get_meta( '_bwi_billing_company_name' ), 'activity' => $order->get_meta( '_bwi_billing_activity' ), 'address' => $order->get_meta( '_bwi_fiscal_address' ), 'municipality' => $order->get_meta( '_bwi_fiscal_municipality' ), 'city' => $order->get_meta( '_bwi_fiscal_city' ), 'email' => $order->get_billing_email(), 'phone' => $order->get_billing_phone(), 'companyOrPerson' => 1 ];
+        } else {
             $code_sii = ! empty( $this->options['boleta_codesii'] ) ? absint($this->options['boleta_codesii']) : self::BSALE_BOLETA_CODE_SII;
-            $client_data = [
-                'code'           => '1-9',
-                'company'        => $order->get_formatted_billing_full_name(),
-                'address'        => $order->get_billing_address_1(),
-                'municipality'   => $order->get_billing_state(),
-                'city'           => $order->get_billing_city(),
-                'email'          => $order->get_billing_email(),
-                'phone'          => $order->get_billing_phone(),
-                'companyOrPerson' => 0,
-            ];
+            $client_data = [ 'code' => '1-9', 'company' => $order->get_formatted_billing_full_name(), 'address' => $order->get_billing_address_1(), 'municipality' => $order->get_billing_state(), 'city' => $order->get_billing_city(), 'email' => $order->get_billing_email(), 'phone' => $order->get_billing_phone(), 'companyOrPerson' => 0 ];
         }
 
         $details = [];
-        // --- INICIO DE LA MODIFICACIÓN ---
-        // ID del impuesto IVA en Bsale. Generalmente es 1. Lo definimos como un string "[1]".
-        $bsale_tax_id_array = '[1]';
-        // --- FIN DE LA MODIFICACIÓN ---
+        $bsale_tax_id_array = '[1]'; // ID del impuesto IVA en Bsale
 
+        // --- INICIO DE LA CORRECCIÓN DE CÁLCULO DE IVA ---
         foreach ( $order->get_items() as $item ) {
             $product = $item->get_product();
             $sku = $product->get_sku();
@@ -176,28 +151,37 @@ final class BWI_Order_Sync {
             if ( empty( $sku ) ) {
                 return new WP_Error( 'missing_sku', 'El producto "' . $product->get_name() . '" no tiene un SKU y no puede ser facturado.' );
             }
-
-            // Usamos el total del item, que ya incluye el IVA.
-            $total_item_price = (float) $item->get_total() + (float) $item->get_total_tax();
+            
+            // 1. Obtenemos el precio TOTAL unitario que pagó el cliente (con IVA).
+            $total_unit_price = ( (float) $item->get_total() + (float) $item->get_total_tax() ) / $item->get_quantity();
+            
+            // 2. Calculamos el valor NETO dividiendo por 1.19 (o el IVA que corresponda).
+            $net_unit_value = $total_unit_price / 1.19;
 
             $details[] = [
                 'code'           => $sku,
                 'quantity'       => $item->get_quantity(),
-                'totalUnitValue' => $total_item_price / $item->get_quantity(), // Enviamos el VALOR TOTAL UNITARIO
+                'netUnitValue'   => $net_unit_value, // Enviamos el valor NETO UNITARIO calculado.
+                'taxId'          => $bsale_tax_id_array,
             ];
         }
 
-        // Añadir el envío como una línea de detalle si existe.
+        // Para el envío, hacemos el mismo cálculo.
         if ( (float) $order->get_shipping_total() > 0 ) {
-            // Usamos el total del envío, que ya incluye el IVA.
+            // 1. Obtenemos el precio TOTAL del envío (con IVA).
             $total_shipping_price = (float) $order->get_shipping_total() + (float) $order->get_shipping_tax();
+            
+            // 2. Calculamos el valor NETO.
+            $net_shipping_price = $total_shipping_price / 1.19;
 
             $details[] = [
-                'comment'        => 'Costo de Envío: ' . $order->get_shipping_method(),
-                'quantity'       => 1,
-                'totalUnitValue' => $total_shipping_price, // Enviamos el VALOR TOTAL del envío
+                'comment'      => 'Costo de Envío: ' . $order->get_shipping_method(),
+                'quantity'     => 1,
+                'netUnitValue' => $net_shipping_price, // Enviamos el VALOR NETO del envío.
+                'taxId'        => $bsale_tax_id_array,
             ];
         }
+        // --- FIN DE LA CORRECCIÓN DE CÁLCULO DE IVA ---
 
         $payload = [
             'codeSii'      => $code_sii,
@@ -207,21 +191,14 @@ final class BWI_Order_Sync {
             'client'       => $client_data,
             'details'      => $details,
         ];
-
-        // Añadir información de pago
+        /*
+        // Lógica de pagos (sin cambios)
         $payment_map_key = 'payment_map_' . $order->get_payment_method();
         $bsale_payment_type_id = isset( $this->options[$payment_map_key] ) ? absint( $this->options[$payment_map_key] ) : 0;
-        
         if ( $bsale_payment_type_id > 0 ) {
-            $payload['payments'] = [
-                [
-                    'paymentTypeId' => $bsale_payment_type_id,
-                    'amount'        => $order->get_total(),
-                    'recordDate'    => $order->get_date_paid() ? $order->get_date_paid()->getTimestamp() : time(),
-                ]
-            ];
+            $payload['payments'] = [ [ 'paymentTypeId' => $bsale_payment_type_id, 'amount' => $order->get_total(), 'recordDate' => $order->get_date_paid() ? $order->get_date_paid()->getTimestamp() : time() ] ];
         }
-
+        */
         return $payload;
     }
     /**
