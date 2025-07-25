@@ -31,6 +31,10 @@ final class BWI_Admin {
         add_action( 'admin_init', [ $this, 'register_settings' ] );
         // Hook para añadir scripts a nuestra página de admin
         add_action( 'admin_enqueue_scripts', [ $this, 'enqueue_admin_scripts' ] );
+        // Hook para mostrar la notificación de error en todo el admin.
+        add_action( 'admin_notices', [ $this, 'display_api_error_notice' ] );
+        // Hook que se activa al cargar nuestra página de ajustes para realizar la prueba.
+        add_action( 'load-settings_page_bwi_settings', [ $this, 'check_api_credentials' ] );
     }
 
     /**
@@ -60,24 +64,77 @@ final class BWI_Admin {
     /**
      * Crea el contenido HTML de la página de ajustes.
      */
+    /**
+     * Crea el contenido HTML de la página de ajustes con pestañas.
+     */
     public function create_settings_page() {
         ?>
         <div class="wrap">
             <h1><?php echo esc_html( get_admin_page_title() ); ?></h1>
             <p><?php _e( 'Configura los parámetros para la integración entre Bsale y WooCommerce.', 'bsale-woocommerce-integration' ); ?></p>
             
-            <form action="options.php" method="post">
-                <?php
-                // Imprime los campos de seguridad de WordPress
-                settings_fields( 'bwi_settings_group' );
-                // Imprime las secciones y campos registrados
-                do_settings_sections( 'bwi_settings' );
-                // Imprime el botón de guardar
-                submit_button( 'Guardar Cambios' );
-                ?>
-            </form>
+            <?php
+            $active_tab = isset( $_GET['tab'] ) ? $_GET['tab'] : 'settings';
+            ?>
+            
+            <h2 class="nav-tab-wrapper">
+                <a href="?page=bwi_settings&tab=settings" class="nav-tab <?php echo $active_tab == 'settings' ? 'nav-tab-active' : ''; ?>">Ajustes</a>
+                <a href="?page=bwi_settings&tab=logs" class="nav-tab <?php echo $active_tab == 'logs' ? 'nav-tab-active' : ''; ?>">Logs</a>
+            </h2>
+            
+            <?php if ( $active_tab == 'settings' ) : ?>
+                <form action="options.php" method="post">
+                    <?php
+                    settings_fields( 'bwi_settings_group' );
+                    do_settings_sections( 'bwi_settings' );
+                    submit_button( 'Guardar Cambios' );
+                    ?>
+                </form>
+            <?php else : // Pestaña de Logs ?>
+                <div id="bwi-logs-viewer">
+                    <h3>Visor de Logs</h3>
+                    <p>Aquí se muestran las últimas 200 líneas de cada archivo de registro. Para ver el archivo completo, ve a <code>WooCommerce > Estado > Logs</code>.</p>
+                    <?php $this->display_logs(); ?>
+                </div>
+            <?php endif; ?>
+            
         </div>
         <?php
+    }
+
+    /**
+     * Lee y muestra el contenido de los archivos de log del plugin.
+     */
+    private function display_logs() {
+        $log_files = [
+            'Sincronización de Productos' => 'bwi-sync',
+            'Sincronización de Pedidos'  => 'bwi-orders',
+            'Webhooks'                 => 'bwi-webhooks',
+        ];
+
+        foreach ( $log_files as $title => $handle ) {
+            echo '<h4>' . esc_html( $title ) . ' (<code>' . esc_html( $handle ) . '</code>)</h4>';
+            
+            $log_path = WC_LOG_DIR . $handle . '-' . sanitize_file_name( wp_hash( $handle ) ) . '.log';
+
+            if ( file_exists( $log_path ) ) {
+                $log_content = file($log_path);
+                $log_content_reversed = array_reverse($log_content);
+                $latest_entries = array_slice($log_content_reversed, 0, 200);
+
+                echo '<pre style="background: #f1f1f1; border: 1px solid #ccc; padding: 10px; border-radius: 5px; max-height: 400px; overflow-y: scroll;">';
+                if ( empty( $latest_entries ) ) {
+                    echo 'El archivo de log está vacío.';
+                } else {
+                    foreach ( $latest_entries as $line ) {
+                        echo esc_html( $line );
+                    }
+                }
+                echo '</pre>';
+            } else {
+                echo '<p><em>No se ha generado un archivo de log para esta categoría aún.</em></p>';
+            }
+        }
     }
 
     /**
@@ -90,6 +147,7 @@ final class BWI_Admin {
         add_settings_section( 'bwi_api_settings_section', 'Configuración de Credenciales (wp-config.php)', null, 'bwi_settings' );
         add_settings_field( 'bwi_access_token_info', 'Access Token', [ $this, 'render_access_token_info_field' ], 'bwi_settings', 'bwi_api_settings_section' );
         add_settings_field( 'bwi_webhook_secret_info', 'Secreto del Webhook', [ $this, 'render_webhook_secret_info_field' ], 'bwi_settings', 'bwi_api_settings_section' );
+        add_settings_field( 'bwi_enable_logging', 'Modo de Depuración', [ $this, 'render_enable_logging_field' ], 'bwi_settings', 'bwi_api_settings_section' );
 
         // --- SECCIÓN: Sincronización de Productos ---
         add_settings_section( 'bwi_sync_settings_section', 'Sincronización de Productos', null, 'bwi_settings' );
@@ -389,6 +447,16 @@ final class BWI_Admin {
         echo '</select>';
         echo '<p class="description">Seleccione un tipo de producto para limitar la sincronización solo a los productos de esa categoría. <strong>Recomendado si tiene muchos productos.</strong></p>';
     }
+
+    /**
+     * Muestra la casilla para activar/desactivar el modo de depuración (logging).
+     */
+    public function render_enable_logging_field() {
+        $options = get_option( 'bwi_options' );
+        $checked = isset( $options['enable_logging'] ) ? checked( 1, $options['enable_logging'], false ) : '';
+        echo '<input type="checkbox" name="bwi_options[enable_logging]" value="1" ' . $checked . '>';
+        echo '<label>Activar para registrar toda la actividad del plugin en los logs. <strong>Advertencia:</strong> Desactívalo en un sitio en producción si no estás depurando para evitar archivos de log grandes.</label>';
+    }
     
     public function sanitize_options( $input ) {
         $new_input = [];
@@ -399,6 +467,8 @@ final class BWI_Admin {
         if ( isset( $input['trigger_status'] ) ) $new_input['trigger_status'] = sanitize_text_field( $input['trigger_status'] );
         if ( isset( $input['boleta_codesii'] ) ) $new_input['boleta_codesii'] = absint( $input['boleta_codesii'] );
         if ( isset( $input['factura_codesii'] ) ) $new_input['factura_codesii'] = absint( $input['factura_codesii'] );
+        if ( isset( $input['enable_email_notification'] ) ) $new_input['enable_email_notification'] = absint( $input['enable_email_notification'] );
+        if ( isset( $input['enable_logging'] ) ) $new_input['enable_logging'] = absint( $input['enable_logging'] );
         if ( isset( $input['product_type_id_sync'] ) ) $new_input['product_type_id_sync'] = absint( $input['product_type_id_sync'] );
         // Recorrer todas las posibles claves de mapeo y guardarlas si existen.
         foreach ( $input as $key => $value ) {
@@ -406,7 +476,7 @@ final class BWI_Admin {
                 $new_input[$key] = sanitize_text_field( $value );
             }
         }
-        if ( isset( $input['enable_email_notification'] ) ) $new_input['enable_email_notification'] = absint( $input['enable_email_notification'] );
+        
         return $new_input;
     }
 
@@ -434,6 +504,55 @@ final class BWI_Admin {
             }
         }
         return $items;
+    }
+
+    /**
+     * Realiza una prueba de conexión a la API de Bsale para validar las credenciales.
+     * Si falla, guarda un transient para mostrar una notificación de error.
+     */
+    public function check_api_credentials() {
+        // Solo ejecutar la prueba si el token está definido.
+        if ( empty( $this->access_token ) ) {
+            return;
+        }
+
+        $api_client = BWI_API_Client::get_instance();
+        // Hacemos una llamada simple y de bajo costo a la API.
+        $response = $api_client->get('offices/count.json');
+
+        $transient_key = 'bwi_api_connection_error';
+
+        if ( is_wp_error( $response ) ) {
+            $error_code = $response->get_error_code();
+            $error_data = $response->get_error_data();
+            
+            // Verificamos si el error es de autenticación (401) o de token inválido.
+            if ( $error_code === 'bwi_api_error' && isset($error_data['status']) && $error_data['status'] == 401 ) {
+                // Guardamos el error en un transient que expira en 1 hora.
+                set_transient( $transient_key, 'Error de autenticación: El Access Token no es válido o ha expirado. Por favor, revísalo en tu archivo wp-config.php.', HOUR_IN_SECONDS );
+            }
+        } else {
+            // Si la conexión es exitosa, nos aseguramos de que no haya ningún aviso de error guardado.
+            delete_transient( $transient_key );
+        }
+    }
+
+    /**
+     * Muestra la notificación de error en el panel de administración si existe.
+     */
+    public function display_api_error_notice() {
+        $error_message = get_transient( 'bwi_api_connection_error' );
+
+        if ( ! empty( $error_message ) ) {
+            ?>
+            <div class="notice notice-error is-dismissible">
+                <p>
+                    <strong><?php esc_html_e( 'Error de Conexión - Bsale Integración', 'bsale-woocommerce-integration' ); ?></strong><br>
+                    <?php echo esc_html( $error_message ); ?>
+                </p>
+            </div>
+            <?php
+        }
     }
 
     /**
