@@ -264,14 +264,15 @@ final class BWI_Order_Sync {
         
         $client_data = [];
         $is_boleta = isset($original_document->document_type->codeSii) && in_array($original_document->document_type->codeSii, [39, 41]);
-
         if ( $is_boleta ) {
+            // Si el documento original es una Boleta, usamos datos genéricos mejorados.
             $client_data = [
-                'code'           => '1-9',
-                'company'        => 'Consumidor Final',
+                'code'           => 'N/A', // Mantenemos el RUT genérico válido.
+                'company'        => 'N/A', // Cambiamos "Consumidor Final" por "N/A" o el texto que prefieras.
                 'address'        => 'N/A',
                 'municipality'   => 'N/A',
                 'city'           => 'N/A',
+                'activity'       => 'N/A', // Añadimos el giro también como N/A
                 'companyOrPerson' => 0,
             ];
         } elseif ( !empty($original_document->client) ) {

@@ -130,6 +130,15 @@ final class BWI_Admin {
                 [ 'gateway' => $gateway ] // Pasamos el objeto de la pasarela a la función de renderizado
             );
         }
+        add_settings_section( 'bwi_email_integration_section', 'Integración con Correos de WooCommerce', null, 'bwi_settings' );
+
+        add_settings_field(
+            'bwi_emails_to_attach_document',
+            'Añadir enlace del documento a los correos',
+            [ $this, 'render_emails_to_attach_field' ],
+            'bwi_settings',
+            'bwi_email_integration_section'
+        );
     }
 
     /**
@@ -389,6 +398,36 @@ final class BWI_Admin {
         echo '</select>';
         echo '<p class="description">Seleccione un tipo de producto para limitar la sincronización solo a los productos de esa categoría. <strong>Recomendado si tiene muchos productos.</strong></p>';
     }
+
+    /**
+     * Muestra checkboxes para seleccionar en qué correos de WooCommerce mostrar el enlace al documento.
+     */
+    public function render_emails_to_attach_field() {
+        $options = get_option('bwi_options');
+        $selected_emails = isset($options['emails_to_attach_document']) ? (array) $options['emails_to_attach_document'] : [];
+        
+        $email_classes = WC()->mailer()->get_emails();
+        $customer_emails = array_filter($email_classes, function($email) {
+            return $email->is_customer_email();
+        });
+
+        if (empty($customer_emails)) {
+            echo 'No se encontraron plantillas de correo para clientes.';
+            return;
+        }
+
+        foreach ($customer_emails as $email) {
+            $email_id = $email->id;
+            $email_title = $email->get_title();
+            $checked = in_array($email_id, $selected_emails) ? 'checked' : '';
+
+            echo '<label style="display: block; margin-bottom: 5px;">';
+            echo '<input type="checkbox" name="bwi_options[emails_to_attach_document][]" value="' . esc_attr($email_id) . '" ' . $checked . '> ';
+            echo esc_html($email_title);
+            echo '</label>';
+        }
+        echo '<p class="description">Selecciona los correos de WooCommerce en los que deseas que aparezca el enlace de descarga para la boleta o factura de Bsale.</p>';
+    }
     
     public function sanitize_options( $input ) {
         $new_input = [];
@@ -405,6 +444,12 @@ final class BWI_Admin {
             if ( strpos( $key, 'payment_map_' ) === 0 ) {
                 $new_input[$key] = sanitize_text_field( $value );
             }
+        }
+        if ( isset( $input['enable_email_notification'] ) ) $new_input['enable_email_notification'] = absint( $input['enable_email_notification'] );
+        if ( isset( $input['emails_to_attach_document'] ) ) {
+            $new_input['emails_to_attach_document'] = array_map( 'sanitize_text_field', (array) $input['emails_to_attach_document'] );
+        } else {
+            $new_input['emails_to_attach_document'] = [];
         }
         return $new_input;
     }
