@@ -141,9 +141,8 @@ final class BWI_Order_Sync {
         }
 
         $details = [];
-        $bsale_tax_id_array = '[1]'; // ID del impuesto IVA en Bsale
+        $bsale_tax_id_array = '[1]';
 
-        // --- INICIO DE LA CORRECCIÓN DE CÁLCULO DE IVA ---
         foreach ( $order->get_items() as $item ) {
             $product = $item->get_product();
             $sku = $product->get_sku();
@@ -152,36 +151,28 @@ final class BWI_Order_Sync {
                 return new WP_Error( 'missing_sku', 'El producto "' . $product->get_name() . '" no tiene un SKU y no puede ser facturado.' );
             }
             
-            // 1. Obtenemos el precio TOTAL unitario que pagó el cliente (con IVA).
             $total_unit_price = ( (float) $item->get_total() + (float) $item->get_total_tax() ) / $item->get_quantity();
-            
-            // 2. Calculamos el valor NETO dividiendo por 1.19 (o el IVA que corresponda).
             $net_unit_value = $total_unit_price / 1.19;
 
             $details[] = [
                 'code'           => $sku,
                 'quantity'       => $item->get_quantity(),
-                'netUnitValue'   => $net_unit_value, // Enviamos el valor NETO UNITARIO calculado.
+                'netUnitValue'   => $net_unit_value,
                 'taxId'          => $bsale_tax_id_array,
             ];
         }
 
-        // Para el envío, hacemos el mismo cálculo.
         if ( (float) $order->get_shipping_total() > 0 ) {
-            // 1. Obtenemos el precio TOTAL del envío (con IVA).
             $total_shipping_price = (float) $order->get_shipping_total() + (float) $order->get_shipping_tax();
-            
-            // 2. Calculamos el valor NETO.
             $net_shipping_price = $total_shipping_price / 1.19;
 
             $details[] = [
                 'comment'      => 'Costo de Envío: ' . $order->get_shipping_method(),
                 'quantity'     => 1,
-                'netUnitValue' => $net_shipping_price, // Enviamos el VALOR NETO del envío.
+                'netUnitValue' => $net_shipping_price,
                 'taxId'        => $bsale_tax_id_array,
             ];
         }
-        // --- FIN DE LA CORRECCIÓN DE CÁLCULO DE IVA ---
 
         $payload = [
             'codeSii'      => $code_sii,
@@ -191,14 +182,27 @@ final class BWI_Order_Sync {
             'client'       => $client_data,
             'details'      => $details,
         ];
-        /*
-        // Lógica de pagos (sin cambios)
-        $payment_map_key = 'payment_map_' . $order->get_payment_method();
-        $bsale_payment_type_id = isset( $this->options[$payment_map_key] ) ? absint( $this->options[$payment_map_key] ) : 0;
-        if ( $bsale_payment_type_id > 0 ) {
-            $payload['payments'] = [ [ 'paymentTypeId' => $bsale_payment_type_id, 'amount' => $order->get_total(), 'recordDate' => $order->get_date_paid() ? $order->get_date_paid()->getTimestamp() : time() ] ];
+
+        
+        // Solo añadimos la información del pago si el documento NO es una factura.
+        if ( 'factura' !== $document_type ) {
+            $payment_map_key = 'payment_map_' . $order->get_payment_method();
+            // Usamos el mapeo que configuramos en los ajustes.
+            $bsale_payment_type_id = isset( $this->options[$payment_map_key] ) ? absint( $this->options[$payment_map_key] ) : 0;
+            
+            // Solo si hay un mapeo válido para esta forma de pago.
+            if ( $bsale_payment_type_id > 0 ) {
+                $payload['payments'] = [
+                    [
+                        'paymentTypeId' => $bsale_payment_type_id,
+                        'amount'        => $order->get_total(),
+                        'recordDate'    => $order->get_date_paid() ? $order->get_date_paid()->getTimestamp() : time(),
+                    ]
+                ];
+            }
         }
-        */
+        
+
         return $payload;
     }
     /**
@@ -236,48 +240,82 @@ final class BWI_Order_Sync {
         if ( ! $order ) return;
 
         $bsale_document_id = $order->get_meta( '_bwi_document_id' );
-        if ( ! $bsale_document_id ) return;
+        if ( ! $bsale_document_id ) {
+            $order->add_order_note( '<strong>Error:</strong> No se puede crear Nota de Crédito. No se encontró ID de documento Bsale original.' );
+            return;
+        }
 
         $api_client = BWI_API_Client::get_instance();
-
-        // Para crear una devolución, necesitamos los IDs de los detalles del documento original.
-        $original_document = $api_client->get( "documents/{$bsale_document_id}.json", [ 'expand' => '[details]' ] );
+        
+        $original_document = $api_client->get( "documents/{$bsale_document_id}.json", [ 'expand' => '[details,client,document_type]' ] );
 
         if ( is_wp_error( $original_document ) || empty( $original_document->details->items ) ) {
             $order->add_order_note( '<strong>Error:</strong> No se pudo obtener el detalle del documento original de Bsale para crear la Nota de Crédito.' );
             return;
         }
-        
-        $payload = [
-            'documentId' => (int) $bsale_document_id,
-            'officeId'   => ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 1,
-            'motive'     => 'Anulación de venta desde WooCommerce. Pedido #' . $order->get_order_number(),
-            'details'    => []
-        ];
 
-        // Mapear los productos reembolsados a los detalles de la devolución.
-        // En este ejemplo, asumimos una devolución total.
-        foreach ( $original_document->details->items as $detail_item ) {
-            $payload['details'][] = [
-                'detailId' => $detail_item->id,
-                'quantity' => $detail_item->quantity
+        $return_details = [];
+        foreach ($original_document->details->items as $detail_item) {
+            $return_details[] = [
+                'documentDetailId' => $detail_item->id,
+                'quantity'         => $detail_item->quantity,
+            ];
+        }
+        
+        $client_data = [];
+        $is_boleta = isset($original_document->document_type->codeSii) && in_array($original_document->document_type->codeSii, [39, 41]);
+
+        if ( $is_boleta ) {
+            $client_data = [
+                'code'           => '1-9',
+                'company'        => 'Consumidor Final',
+                'address'        => 'N/A',
+                'municipality'   => 'N/A',
+                'city'           => 'N/A',
+                'companyOrPerson' => 0,
+            ];
+        } elseif ( !empty($original_document->client) ) {
+            $client_data = [
+                'code'           => $original_document->client->code,
+                'city'           => $original_document->client->city,
+                'company'        => $original_document->client->company,
+                'municipality'   => $original_document->client->municipality,
+                'activity'       => $original_document->client->activity,
+                'address'        => $original_document->client->address,
+                'companyOrPerson'=> $original_document->client->companyOrPerson,
             ];
         }
 
-        // Aquí usamos el método que ya creamos en el cliente de la API
-        $response = $api_client->create_return( $payload );
+        $payload = [
+            'referenceDocumentId' => (int) $bsale_document_id,
+            'documentTypeId'      => 9,
+            'officeId'            => ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 1,
+            'motive'              => 'Anulación de venta desde WooCommerce. Pedido #' . $order->get_order_number(),
+            'client'              => $client_data,
+            'details'             => $return_details,
+            'declareSii'          => 1,
+            // --- INICIO DE LA CORRECCIÓN ---
+            'emissionDate'        => time(), // Se añade la fecha de emisión actual
+            // --- FIN DE LA CORRECCIÓN ---
+        ];
+
+        $response = $api_client->post( 'returns.json', $payload );
 
         if ( is_wp_error( $response ) ) {
             $order->add_order_note( '<strong>Error al crear Nota de Crédito en Bsale:</strong> ' . $response->get_error_message() );
-        } else if ( isset( $response->id ) ) {
+        } else if ( isset( $response->id ) && isset($response->credit_note->urlPdf) ) {
             $order->update_meta_data( '_bwi_return_id', $response->id );
+            $order->update_meta_data( '_bwi_credit_note_url', $response->credit_note->urlPdf );
             
-            $note = 'Nota de Crédito creada exitosamente en Bsale. ID de Devolución: ' . $response->id;
-            if(isset($response->credit_note->urlPdf)) {
-                $note .= sprintf(' <a href="%s" target="_blank">Ver PDF</a>', esc_url($response->credit_note->urlPdf));
-            }
+            $note = sprintf(
+                'Nota de Crédito creada exitosamente en Bsale. Folio: %s. <a href="%s" target="_blank">Ver PDF</a>',
+                esc_html( $response->credit_note->number ),
+                esc_url( $response->credit_note->urlPdf )
+            );
             $order->add_order_note( $note );
             $order->save();
+        } else {
+             $order->add_order_note( '<strong>Respuesta inesperada de Bsale al crear la Nota de Crédito.</strong> Respuesta: ' . wp_json_encode($response) );
         }
     }
 
