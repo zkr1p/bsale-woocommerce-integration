@@ -112,6 +112,13 @@ final class BWI_Webhooks {
                 }
                 break;
 
+            case 'variant':
+                // Solo nos interesan las actualizaciones (que incluyen la desactivación)
+                if ( isset($payload['action']) && $payload['action'] === 'put' ) {
+                    BWI_Product_Sync::get_instance()->handle_variant_update_webhook( $payload );
+                }
+                break;
+                
             case 'document.created':
                 // Aquí podríamos añadir lógica para, por ejemplo, actualizar el estado de un pedido.
                 // BWI_Order_Sync::get_instance()->update_order_from_webhook($payload);

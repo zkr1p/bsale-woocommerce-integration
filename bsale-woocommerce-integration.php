@@ -3,7 +3,7 @@
  * Plugin Name:         Integración Bsale y WooCommerce - LOV
  * Plugin URI:          https://whydot.co
  * Description:         Sincroniza productos, stock, pedidos y facturación entre Bsale y WooCommerce basado en la documentación actualizada de la API de Bsale.
- * Version:             2.8.6
+ * Version:             2.8.9
  * Author:              WHYDOTCO
  * Author URI:          https://whydot.co
  * License:             GPLv2 or later
@@ -132,6 +132,7 @@ final class Bsale_WooCommerce_Integration {
 
         // Clase para manejar los Webhooks entrantes de Bsale
         require_once BWI_PLUGIN_PATH . 'includes/class-bwi-webhooks.php';
+
     }
 
     /**
@@ -144,6 +145,7 @@ final class Bsale_WooCommerce_Integration {
         BWI_Order_Sync::get_instance();
         BWI_Checkout::get_instance();
         BWI_Webhooks::get_instance();
+        add_filter( 'woocommerce_email_classes', [ $this, 'add_bsale_email_to_woocommerce' ] );
     }
 
     /**
@@ -171,6 +173,20 @@ final class Bsale_WooCommerce_Integration {
             </p>
         </div>
         <?php
+    }
+
+    /**
+     * Añade nuestro correo personalizado a la lista de correos de WooCommerce.
+     * Carga el archivo de la clase justo en el momento necesario para evitar errores de carga.
+     *
+     * @param array $email_classes Las clases de correo existentes.
+     * @return array La lista de clases con nuestro correo añadido.
+     */
+    public function add_bsale_email_to_woocommerce( $email_classes ) {
+        // Incluimos el archivo de nuestra clase de correo aquí.
+        // Esto garantiza que se carga solo cuando WooCommerce está listo.
+        $email_classes['BWI_Email_Customer_Document'] = include( BWI_PLUGIN_PATH . 'emails/class-bwi-email-customer-document.php' );
+        return $email_classes;
     }
 }
 

@@ -166,6 +166,22 @@ final class BWI_Product_Sync {
             $has_changes = false;
             $log_details = [];
 
+            // El estado en Bsale es 0 para activo y 1 para inactivo.
+            $bsale_state = isset($variant_data['state']) ? (int) $variant_data['state'] : 0;
+            $wc_status = $product->get_status(); // 'publish' (publicado) o 'draft' (borrador)
+
+            if ( $bsale_state === 1 && $wc_status === 'publish' ) {
+                // Si Bsale está inactivo y WC está publicado, lo ponemos como borrador.
+                $product->set_status('draft');
+                $has_changes = true;
+                $log_details[] = "CAMBIO DE ESTADO: Producto desactivado (pasado a borrador).";
+            } elseif ( $bsale_state === 0 && $wc_status !== 'publish' ) {
+                // Si Bsale está activo y WC no está publicado, lo publicamos.
+                $product->set_status('publish');
+                $has_changes = true;
+                $log_details[] = "CAMBIO DE ESTADO: Producto activado (publicado).";
+            }
+
             // --- SINCRONIZACIÓN DE STOCK ---
             $stock_bsale = $this->get_stock_for_variant( $variant_id );
             if ( is_wp_error( $stock_bsale ) ) {
@@ -426,10 +442,8 @@ final class BWI_Product_Sync {
         $params = [ 'variantid' => $variant_id_webhook ];
         $price_details = $this->api_client->get( $endpoint, $params );
         
-        // --- INICIO DE LA MODIFICACIÓN ---
         // ¡Este es nuestro espía! Registraremos la respuesta completa de Bsale.
         $logger->info( 'Respuesta de la API de Precios (Webhook): ' . wp_json_encode($price_details), [ 'source' => 'bwi-webhooks' ] );
-        // --- FIN DE LA MODIFICACIÓN ---
 
         $new_price = null;
 
@@ -452,6 +466,67 @@ final class BWI_Product_Sync {
         } else {
             $error_message = is_wp_error($price_details) ? $price_details->get_error_message() : 'La respuesta de la API v1 no contenía un formato de precio válido.';
             $logger->error( "Error de Webhook de Precio: No se pudo obtener el nuevo precio para SKU [{$sku}]. Razón: " . $error_message, [ 'source' => 'bwi-webhooks' ] );
+        }
+    }
+
+    /**
+     * Maneja un webhook de actualización de variante (incluyendo activación/desactivación).
+     *
+     * @param array $payload El payload del webhook de Bsale.
+     */
+    public function handle_variant_update_webhook( $payload ) {
+        $logger = wc_get_logger();
+
+        if ( ! isset( $payload['resourceId'] ) ) {
+            $logger->warning( 'Webhook de variante sin resourceId.', [ 'source' => 'bwi-webhooks' ] );
+            return;
+        }
+
+        $variant_id_webhook = absint( $payload['resourceId'] );
+
+        // Obtenemos los detalles completos de la variante para saber su estado y SKU.
+        $variant_details = $this->api_client->get( "variants/{$variant_id_webhook}.json" );
+
+        if ( is_wp_error( $variant_details ) || empty( $variant_details->code ) ) {
+            $logger->error( "Error de Webhook de Variante: No se pudo obtener detalles para la variante Bsale ID [{$variant_id_webhook}].", [ 'source' => 'bwi-webhooks' ] );
+            return;
+        }
+        
+        $sku = $variant_details->code;
+        $product_id = wc_get_product_id_by_sku( $sku );
+
+        if ( ! $product_id ) {
+            $logger->info( "Webhook de Variante ignorado: No se encontró producto en WooCommerce con SKU [{$sku}].", [ 'source' => 'bwi-webhooks' ] );
+            return;
+        }
+
+        try {
+            $product = wc_get_product( $product_id );
+            if ( ! $product ) { return; }
+
+            $bsale_state = isset( $variant_details->state ) ? (int) $variant_details->state : 0;
+            $wc_status = $product->get_status();
+
+            $status_changed = false;
+            if ( $bsale_state === 1 && $wc_status === 'publish' ) {
+                // Si Bsale está inactivo y WC está publicado, lo ponemos como borrador.
+                $product->set_status('draft');
+                $status_changed = true;
+                $logger->info( "ÉXITO Webhook: Producto SKU [{$sku}] desactivado (pasado a borrador).", [ 'source' => 'bwi-webhooks' ] );
+            } elseif ( $bsale_state === 0 && $wc_status !== 'publish' ) {
+                // Si Bsale está activo y WC no está publicado, lo publicamos.
+                $product->set_status('publish');
+                $status_changed = true;
+                $logger->info( "ÉXITO Webhook: Producto SKU [{$sku}] activado (publicado).", [ 'source' => 'bwi-webhooks' ] );
+            }
+            
+            // Si hubo un cambio de estado, guardamos el producto.
+            if ( $status_changed ) {
+                $product->save();
+            }
+
+        } catch ( Exception $e ) {
+            $logger->error( 'EXCEPCIÓN en Webhook de Variante para SKU ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-webhooks' ] );
         }
     }
 }

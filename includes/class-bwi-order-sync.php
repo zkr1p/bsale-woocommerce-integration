@@ -91,25 +91,21 @@ final class BWI_Order_Sync {
             return;
         }
 
-        // Construir el payload.
         $payload = $this->build_bsale_payload( $order );
         if ( is_wp_error( $payload ) ) {
             $order->add_order_note( 'Error al construir payload para Bsale: ' . $payload->get_error_message() );
             return;
         }
 
-        // Enviar la solicitud a la API.
         $api_client = BWI_API_Client::get_instance();
         $response = $api_client->post( 'documents.json', $payload );
 
-        // Manejar la respuesta.
         if ( is_wp_error( $response ) ) {
             $order->add_order_note( '<strong>Error al crear documento en Bsale:</strong> ' . $response->get_error_message() );
-        } else if ( isset( $response->id ) ) {
+        } else if ( isset( $response->id ) && isset( $response->urlPdf ) ) {
             $order->update_meta_data( '_bwi_document_id', $response->id );
             $order->update_meta_data( '_bwi_document_number', $response->number );
             $order->update_meta_data( '_bwi_document_url', $response->urlPdf );
-            $order->save();
 
             $note = sprintf(
                 'Documento creado exitosamente en Bsale. Folio: %s. <a href="%s" target="_blank">Ver PDF</a>',
@@ -117,6 +113,13 @@ final class BWI_Order_Sync {
                 esc_url( $response->urlPdf )
             );
             $order->add_order_note( $note );
+            
+            // 1. Guardamos los cambios en la base de datos PRIMERO.
+            $order->save();
+            
+            // 2. Solo DESPUÉS de guardar, disparamos la acción para enviar el correo.
+            do_action( 'bwi_send_document_email_notification', $order_id );
+            
         } else {
              $order->add_order_note( '<strong>Respuesta inesperada de la API de Bsale al crear documento.</strong>' );
         }

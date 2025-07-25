@@ -40,7 +40,6 @@ final class BWI_Checkout {
 
         // Hook para añadir el script JS al frontend
         add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_checkout_assets' ] );
-        add_action( 'woocommerce_email_order_meta', [ $this, 'add_bsale_document_link_to_emails' ], 20, 4 );
     }
 
     /**
@@ -219,54 +218,8 @@ final class BWI_Checkout {
 
         return strtoupper($dv) == $dvr;
     }
+
     
-    /**
-     * Añade el enlace al documento de Bsale en los correos de WooCommerce.
-     *
-     * @param WC_Order $order         El objeto del pedido.
-     * @param bool     $sent_to_admin True si el correo es para el admin.
-     * @param bool     $plain_text    True si el correo es en texto plano.
-     * @param WC_Email $email         El objeto del correo.
-     */
-    public function add_bsale_document_link_to_emails( $order, $sent_to_admin, $plain_text, $email ) {
-        // No mostrar en correos al admin
-        if ( $sent_to_admin ) {
-            return;
-        }
-
-        // Obtener las opciones del plugin
-        $options = get_option('bwi_options');
-        $selected_emails = isset($options['emails_to_attach_document']) ? (array) $options['emails_to_attach_document'] : [];
-        
-        // Verificar si este correo está seleccionado en los ajustes
-        if ( ! in_array( $email->id, $selected_emails ) ) {
-            return;
-        }
-
-        // Obtener la URL del PDF guardada en el pedido
-        $pdf_url = $order->get_meta('_bwi_document_url');
-        $doc_number = $order->get_meta('_bwi_document_number');
-
-        if ( ! empty( $pdf_url ) && ! empty( $doc_number ) ) {
-            $doc_type = $order->get_meta('_bwi_document_type') === 'factura' ? 'Factura' : 'Boleta';
-
-            if ( $plain_text ) {
-                echo "\n----------------------------------------\n\n";
-                echo strtoupper(esc_html($doc_type)) . ' ELECTRÓNICA' . "\n";
-                echo 'Folio: ' . esc_html($doc_number) . "\n";
-                echo 'Descargar: ' . esc_url($pdf_url) . "\n";
-                echo "\n----------------------------------------\n\n";
-            } else {
-                echo '<div style="margin-bottom: 40px;">';
-                echo '<h2>' . esc_html(ucfirst($doc_type)) . ' Electrónica</h2>';
-                echo '<p>Puedes descargar tu documento tributario desde el siguiente enlace:</p>';
-                echo '<p><a href="' . esc_url($pdf_url) . '" target="_blank" style="font-size: 14px; color: #ffffff; background-color: #0073aa; text-decoration: none; padding: 12px 20px; border-radius: 5px; display: inline-block;">';
-                echo 'Descargar ' . esc_html($doc_type) . ' (Folio ' . esc_html($doc_number) . ')';
-                echo '</a></p>';
-                echo '</div>';
-            }
-        }
-    }
     /**
      * Encola el script JS para el checkout.
      */
