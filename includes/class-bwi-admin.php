@@ -163,7 +163,14 @@ final class BWI_Admin {
         add_settings_field( 'bwi_trigger_status', 'Estado para Generar Documento', [ $this, 'render_trigger_status_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
         add_settings_field( 'bwi_boleta_codesii', 'Código SII para Boletas', [ $this, 'render_boleta_codesii_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
         add_settings_field( 'bwi_factura_codesii', 'Código SII para Facturas', [ $this, 'render_factura_codesii_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
-    
+        // NUEVO CAMPO: Nota de Crédito
+        add_settings_field(
+            'bwi_credit_note_doc_type_id',
+            'Tipo de Documento para Notas de Crédito',
+            [ $this, 'render_credit_note_doc_type_id_field' ],
+            'bwi_settings',
+            'bwi_billing_settings_section'
+        );
         // --- SECCIÓN: Webhooks ---
         add_settings_section( 'bwi_webhooks_section', 'Configuración de Webhooks', null, 'bwi_settings' );
         add_settings_field( 'bwi_webhook_url', 'URL para Webhooks', [ $this, 'render_webhook_url_field' ], 'bwi_settings', 'bwi_webhooks_section' );
@@ -457,6 +464,38 @@ final class BWI_Admin {
         echo '<input type="checkbox" name="bwi_options[enable_logging]" value="1" ' . $checked . '>';
         echo '<label>Activar para registrar toda la actividad del plugin en los logs. <strong>Advertencia:</strong> Desactívalo en un sitio en producción si no estás depurando para evitar archivos de log grandes.</label>';
     }
+
+    /**
+     * Renderiza el campo para seleccionar el Tipo de Documento para Notas de Crédito.
+     */
+    public function render_credit_note_doc_type_id_field() {
+        $options = get_option('bwi_options');
+        $selected_id = isset($options['credit_note_doc_type_id']) ? $options['credit_note_doc_type_id'] : '';
+
+        $transient_key = 'bwi_document_types_' . substr(md5($this->access_token), 0, 12);
+        $document_types = $this->get_bsale_items_with_cache('document_types.json', $transient_key, ['state' => 0]);
+
+        echo '<select name="bwi_options[credit_note_doc_type_id]">';
+        echo '<option value="">-- Seleccionar --</option>';
+
+        if ( !empty($document_types) ) {
+            foreach ( $document_types as $doc_type ) {
+                // Buscamos específicamente documentos que sean Nota de Crédito (código 61)
+                if (isset($doc_type->codeSii) && $doc_type->codeSii == '61') {
+                    printf(
+                        '<option value="%d" %s>%s</option>',
+                        esc_attr($doc_type->id),
+                        selected($selected_id, $doc_type->id, false),
+                        esc_html($doc_type->name)
+                    );
+                }
+            }
+        } else {
+            echo '<option value="">No se pudieron cargar los tipos de documento.</option>';
+        }
+        echo '</select>';
+        echo '<p class="description">Selecciona el documento que usarás para generar Notas de Crédito. Debe ser un documento con Código SII 61.</p>';
+    }
     
     public function sanitize_options( $input ) {
         $new_input = [];
@@ -470,6 +509,7 @@ final class BWI_Admin {
         if ( isset( $input['enable_email_notification'] ) ) $new_input['enable_email_notification'] = absint( $input['enable_email_notification'] );
         if ( isset( $input['enable_logging'] ) ) $new_input['enable_logging'] = absint( $input['enable_logging'] );
         if ( isset( $input['product_type_id_sync'] ) ) $new_input['product_type_id_sync'] = absint( $input['product_type_id_sync'] );
+        if ( isset( $input['credit_note_doc_type_id'] ) ) $new_input['credit_note_doc_type_id'] = absint( $input['credit_note_doc_type_id'] );
         // Recorrer todas las posibles claves de mapeo y guardarlas si existen.
         foreach ( $input as $key => $value ) {
             if ( strpos( $key, 'payment_map_' ) === 0 ) {
