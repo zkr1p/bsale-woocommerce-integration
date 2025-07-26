@@ -333,7 +333,7 @@ final class BWI_Product_Sync {
     }
 
         
-     public function update_stock_from_webhook( $payload ) {
+    public function update_stock_from_webhook( $payload ) {
         $logger = wc_get_logger();
 
         if ( ! isset( $payload['resourceId'], $payload['officeId'] ) ) {
@@ -345,6 +345,17 @@ final class BWI_Product_Sync {
         $office_id_webhook = absint($payload['officeId']);
         
         $this->options = get_option( 'bwi_options' );
+        
+        // --- INICIO DE LA CORRECCIÓN ---
+        // Verificamos si el cambio de stock ocurrió en la sucursal que nos interesa.
+        $office_id_settings = ! empty( $this->options['office_id_stock'] ) ? absint( $this->options['office_id_stock'] ) : 0;
+
+        if ( $office_id_webhook !== $office_id_settings ) {
+            $logger->info( "Webhook de Stock ignorado: El cambio ocurrió en la sucursal [{$office_id_webhook}], pero la tienda está configurada para sincronizar con la sucursal [{$office_id_settings}].", [ 'source' => 'bwi-webhooks' ] );
+            return;
+        }
+        // --- FIN DE LA CORRECCIÓN ---
+        
         $product_type_id_sync = ! empty( $this->options['product_type_id_sync'] ) ? absint($this->options['product_type_id_sync']) : 0;
 
         $variant_details = $this->api_client->get("variants/{$variant_id_webhook}.json", ['expand' => '[product]']);
@@ -366,17 +377,10 @@ final class BWI_Product_Sync {
         $product_id = wc_get_product_id_by_sku( $sku );
 
         if ( $product_id ) {
-            // --- INICIO DE LA CORRECCIÓN FINAL ---
-            // Ignoramos la URL del webhook y construimos nuestra propia llamada a la API v1, que está documentada.
-            $params = [
-                'variantid' => $variant_id_webhook,
-                'officeid'  => $office_id_webhook
-            ];
+            $params = [ 'variantid' => $variant_id_webhook, 'officeid'  => $office_id_webhook ];
             $stock_details = $this->api_client->get( 'stocks.json', $params );
-            // --- FIN DE LA CORRECCIÓN FINAL ---
-
+            
             $quantity = null;
-
             if ( !is_wp_error($stock_details) && !empty($stock_details->items) && isset($stock_details->items[0]->quantityAvailable) ) {
                 $quantity = intval($stock_details->items[0]->quantityAvailable);
             }
@@ -384,9 +388,25 @@ final class BWI_Product_Sync {
             if ( $quantity !== null ) {
                 try {
                     $product = wc_get_product( $product_id );
-                    $product->set_stock_quantity( $quantity );
-                    $product->save();
-                    $logger->info( "ÉXITO Webhook: Stock actualizado para SKU {$sku}. Nueva cantidad: {$quantity}", [ 'source' => 'bwi-webhooks' ] );
+                    $stock_before = $product->get_stock_quantity();
+
+                    if ( ! $product->get_manage_stock() ) {
+                        $product->set_manage_stock( true );
+                        $logger->info( "Se activó la gestión de inventario para el SKU {$sku}.", [ 'source' => 'bwi-webhooks' ] );
+                    }
+                    
+                    wc_update_product_stock( $product, $quantity, 'set' );
+                    clean_post_cache( $product_id );
+                    wc_delete_product_transients( $product_id );
+                    
+                    $product_after = wc_get_product( $product_id );
+                    $stock_after = $product_after->get_stock_quantity();
+
+                    if ( $stock_after == $quantity ) {
+                        $logger->info( "ÉXITO Webhook: Stock actualizado para SKU {$sku}. Antes: {$stock_before}, Ahora: {$stock_after}. Caché limpiada.", [ 'source' => 'bwi-webhooks' ] );
+                    } else {
+                        $logger->error( "FALLO Webhook: Se intentó actualizar el stock para SKU {$sku} de {$stock_before} a {$quantity}, pero el valor final es {$stock_after}. Posible conflicto de plugin o caché.", [ 'source' => 'bwi-webhooks' ] );
+                    }
                 } catch ( Exception $e ) {
                     $logger->error( 'EXCEPCIÓN en Webhook de Stock para SKU ' . $sku . ': ' . $e->getMessage(), [ 'source' => 'bwi-webhooks' ] );
                 }

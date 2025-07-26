@@ -134,13 +134,51 @@ final class BWI_Order_Sync {
     private function build_bsale_payload( $order ) {
         $document_type = $order->get_meta( '_bwi_document_type' );
 
-        // Lógica para definir $client_data y $code_sii (sin cambios)
+        $payload = [
+            'officeId'     => ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 1,
+            'priceListId'  => ! empty( $this->options['price_list_id'] ) ? absint($this->options['price_list_id']) : 1,
+            'emissionDate' => time(),
+        ];
+
+        // LÓGICA DE FACTURA: Se mantiene igual.
         if ( 'factura' === $document_type ) {
-            $code_sii = ! empty( $this->options['factura_codesii'] ) ? absint($this->options['factura_codesii']) : self::BSALE_FACTURA_CODE_SII;
-            $client_data = [ 'code' => $order->get_meta( '_bwi_billing_rut' ), 'company' => $order->get_meta( '_bwi_billing_company_name' ), 'activity' => $order->get_meta( '_bwi_billing_activity' ), 'address' => $order->get_meta( '_bwi_fiscal_address' ), 'municipality' => $order->get_meta( '_bwi_fiscal_municipality' ), 'city' => $order->get_meta( '_bwi_fiscal_city' ), 'email' => $order->get_billing_email(), 'phone' => $order->get_billing_phone(), 'companyOrPerson' => 1 ];
-        } else {
-            $code_sii = ! empty( $this->options['boleta_codesii'] ) ? absint($this->options['boleta_codesii']) : self::BSALE_BOLETA_CODE_SII;
-            $client_data = [ 'code' => '1-9', 'company' => $order->get_formatted_billing_full_name(), 'address' => $order->get_billing_address_1(), 'municipality' => $order->get_billing_state(), 'city' => $order->get_billing_city(), 'email' => $order->get_billing_email(), 'phone' => $order->get_billing_phone(), 'companyOrPerson' => 0 ];
+            $payload['codeSii'] = ! empty( $this->options['factura_codesii'] ) ? absint($this->options['factura_codesii']) : 33;
+            
+            $payload['client'] = [
+                'code'           => $order->get_meta( '_bwi_billing_rut' ),
+                'company'        => $order->get_meta( '_bwi_billing_company_name' ),
+                'activity'       => $order->get_meta( '_bwi_billing_activity' ),
+                'address'        => $order->get_meta( '_bwi_fiscal_address' ),
+                'municipality'   => $order->get_meta( '_bwi_fiscal_municipality' ),
+                'city'           => $order->get_meta( '_bwi_fiscal_city' ),
+                'email'          => $order->get_billing_email(),
+                'phone'          => $order->get_billing_phone(),
+                'companyOrPerson' => 1,
+            ];
+        } 
+        // LÓGICA DE BOLETA: Implementamos el uso del nombre del cliente de WooCommerce.
+        else {
+            $payload['codeSii'] = ! empty( $this->options['boleta_codesii'] ) ? absint($this->options['boleta_codesii']) : 39;
+
+            // --- INICIO DE LA MODIFICACIÓN FINAL ---
+            // Obtenemos el nombre y apellido del pedido.
+            $first_name = trim( $order->get_billing_first_name() );
+            $last_name = trim( $order->get_billing_last_name() );
+
+            // Si ambos están vacíos, usamos un valor genérico como respaldo para evitar errores.
+            if ( empty( $first_name ) && empty( $last_name ) ) {
+                $first_name = 'Cliente';
+                $last_name = 'Tienda';
+            }
+
+            $payload['client'] = [
+                'code'           => '1-9', // Mantenemos el RUT genérico válido.
+                'firstName'      => $first_name,
+                'lastName'       => $last_name,
+                'email'          => $order->get_billing_email(), // Es útil enviar también el email.
+                'companyOrPerson'=> 0, // 0 indica que es persona natural.
+            ];
+            // --- FIN DE LA MODIFICACIÓN FINAL ---
         }
 
         $details = [];
@@ -177,34 +215,16 @@ final class BWI_Order_Sync {
             ];
         }
 
-        $payload = [
-            'codeSii'      => $code_sii,
-            'officeId'     => ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 1,
-            'priceListId'  => ! empty( $this->options['price_list_id'] ) ? absint($this->options['price_list_id']) : 1,
-            'emissionDate' => time(),
-            'client'       => $client_data,
-            'details'      => $details,
-        ];
-
+        $payload['details'] = $details;
         
-        // Solo añadimos la información del pago si el documento NO es una factura.
         if ( 'factura' !== $document_type ) {
             $payment_map_key = 'payment_map_' . $order->get_payment_method();
-            // Usamos el mapeo que configuramos en los ajustes.
             $bsale_payment_type_id = isset( $this->options[$payment_map_key] ) ? absint( $this->options[$payment_map_key] ) : 0;
             
-            // Solo si hay un mapeo válido para esta forma de pago.
             if ( $bsale_payment_type_id > 0 ) {
-                $payload['payments'] = [
-                    [
-                        'paymentTypeId' => $bsale_payment_type_id,
-                        'amount'        => $order->get_total(),
-                        'recordDate'    => $order->get_date_paid() ? $order->get_date_paid()->getTimestamp() : time(),
-                    ]
-                ];
+                $payload['payments'] = [ [ 'paymentTypeId' => $bsale_payment_type_id, 'amount' => $order->get_total(), 'recordDate' => $order->get_date_paid() ? $order->get_date_paid()->getTimestamp() : time() ] ];
             }
         }
-        
 
         return $payload;
     }
@@ -250,6 +270,7 @@ final class BWI_Order_Sync {
 
         $api_client = BWI_API_Client::get_instance();
         
+        // Obtenemos todos los detalles del documento original.
         $original_document = $api_client->get( "documents/{$bsale_document_id}.json", [ 'expand' => '[details,client,document_type]' ] );
 
         if ( is_wp_error( $original_document ) || empty( $original_document->details->items ) ) {
@@ -267,43 +288,47 @@ final class BWI_Order_Sync {
         
         $client_data = [];
         $is_boleta = isset($original_document->document_type->codeSii) && in_array($original_document->document_type->codeSii, [39, 41]);
+
         if ( $is_boleta ) {
-            // Si el documento original es una Boleta, usamos datos genéricos mejorados.
+            // Para boletas, usamos un cliente genérico.
             $client_data = [
-                'code'           => 'N/A', // Mantenemos el RUT genérico válido.
-                'company'        => 'N/A', // Cambiamos "Consumidor Final" por "N/A" o el texto que prefieras.
-                'address'        => 'N/A',
-                'municipality'   => 'N/A',
-                'city'           => 'N/A',
-                'activity'       => 'N/A', // Añadimos el giro también como N/A
-                'companyOrPerson' => 0,
+                'code'           => '1-9',
+                'firstName'      => 'Cliente',
+                'lastName'       => 'Tienda',
+                'companyOrPerson'=> 0,
             ];
         } elseif ( !empty($original_document->client) ) {
+            // Para facturas, usamos los datos del cliente original.
             $client_data = [
                 'code'           => $original_document->client->code,
-                'city'           => $original_document->client->city,
                 'company'        => $original_document->client->company,
-                'municipality'   => $original_document->client->municipality,
-                'activity'       => $original_document->client->activity,
                 'address'        => $original_document->client->address,
+                'municipality'   => $original_document->client->municipality,
+                'city'           => $original_document->client->city,
+                'activity'       => $original_document->client->activity,
                 'companyOrPerson'=> $original_document->client->companyOrPerson,
             ];
         }
 
+        // --- INICIO DE LA CORRECCIÓN FINAL ---
+        // Construimos el payload siguiendo estrictamente el ejemplo de la documentación.
         $payload = [
-            'referenceDocumentId' => (int) $bsale_document_id,
-            'documentTypeId'      => 9,
+            'documentTypeId'      => 9, // ID para Nota de Crédito Electrónica
             'officeId'            => ! empty( $this->options['office_id_stock'] ) ? absint($this->options['office_id_stock']) : 1,
+            'referenceDocumentId' => (int) $bsale_document_id,
+            'emissionDate'        => time(),
+            'expirationDate'      => time(), // Requerido por el ejemplo.
             'motive'              => 'Anulación de venta desde WooCommerce. Pedido #' . $order->get_order_number(),
+            'declareSii'          => 1,
+            'priceAdjustment'     => 0,   // Requerido por el ejemplo, asumimos anulación de productos.
+            'editTexts'           => 0,   // Requerido por el ejemplo.
+            'type'                => 0,   // Requerido por el ejemplo. 0 = Devolución de dinero.
             'client'              => $client_data,
             'details'             => $return_details,
-            'declareSii'          => 1,
-            // --- INICIO DE LA CORRECCIÓN ---
-            'emissionDate'        => time(), // Se añade la fecha de emisión actual
-            // --- FIN DE LA CORRECCIÓN ---
         ];
 
         $response = $api_client->post( 'returns.json', $payload );
+        // --- FIN DE LA CORRECCIÓN FINAL ---
 
         if ( is_wp_error( $response ) ) {
             $order->add_order_note( '<strong>Error al crear Nota de Crédito en Bsale:</strong> ' . $response->get_error_message() );
@@ -322,5 +347,4 @@ final class BWI_Order_Sync {
              $order->add_order_note( '<strong>Respuesta inesperada de Bsale al crear la Nota de Crédito.</strong> Respuesta: ' . wp_json_encode($response) );
         }
     }
-
 }
