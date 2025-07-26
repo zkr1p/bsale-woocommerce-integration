@@ -94,82 +94,77 @@ final class BWI_Order_Sync {
             $payload['client'] = ['code' => '1-9','firstName' => $first_name,'lastName' => $last_name,'email' => $order->get_billing_email(),'companyOrPerson' => 0];
         }
 
-        $details = [];
-        $bsale_tax_id_array = '[1]';
-        $total_net_calculated = 0;
+        $final_details = [];
+        $bsale_tax_id_array = '[1]'; // Asumimos que [1] es el ID del IVA en Bsale.
+        $prices_include_tax = ( get_option( 'woocommerce_prices_include_tax' ) === 'yes' );
+        $tax_rate = 1.19; // IVA del 19% para Chile.
 
+        // Procesa cada producto del pedido.
         foreach ($order->get_items() as $item) {
             $product = $item->get_product();
             $sku = $product ? $product->get_sku() : '';
             if (empty($sku)) { return new WP_Error('missing_sku', 'Un producto en el pedido no tiene SKU.'); }
 
             $quantity = $item->get_quantity();
-            $line_net = $item->get_total();
+            $line_total_net = (float) $item->get_total();
             
-            $details[] = [
-                'type' => 'product',
-                'sku' => $sku,
+            // Si los precios en WooCommerce se ingresan con IVA incluido, recalculamos el neto.
+            // Esta es la corrección clave para asegurar que no se añada IVA dos veces.
+            if ($prices_include_tax) {
+                $line_gross = $line_total_net + (float) $item->get_total_tax();
+                $line_net = ($line_gross > 0) ? $line_gross / $tax_rate : 0;
+            }
+
+            $final_details[] = [
+                'code' => $sku,
                 'quantity' => $quantity,
-                'net_unit_value' => $quantity > 0 ? $line_net / $quantity : 0
+                'netUnitValue' => $quantity > 0 ? $line_net / $quantity : 0,
+                'taxId' => $bsale_tax_id_array
             ];
-            $total_net_calculated += $line_net;
         }
 
-        $shipping_total = $order->get_shipping_total();
+        // Procesa el costo de envío.
+        $shipping_total = (float) $order->get_shipping_total();
         if ($shipping_total > 0) {
+            $shipping_tax = (float) $order->get_shipping_tax();
             $shipping_net = $shipping_total;
-            $details[] = [
-                'type' => 'shipping',
-                'comment' => 'Costo de Envío: ' . $order->get_shipping_method(),
-                'net_unit_value' => $shipping_net
-            ];
-            $total_net_calculated += $shipping_net;
+
+            if ($prices_include_tax) {
+                $shipping_gross = $shipping_total + $shipping_tax;
+                $shipping_net = ($shipping_gross > 0) ? $shipping_gross / $tax_rate : 0;
+            }
+            
+            $final_details[] = [
+               'comment' => 'Costo de Envío: ' . $order->get_shipping_method(),
+               'quantity' => 1,
+               'netUnitValue' => $shipping_net,
+               'taxId' => $bsale_tax_id_array
+           ];
         }
 
-        $cart_discount = $order->get_discount_total();
+        // Procesa los descuentos aplicados al carrito.
+        $cart_discount = (float) $order->get_discount_total();
         if ($cart_discount > 0) {
-            $details[] = [
-                'type' => 'discount',
+            $discount_tax = (float) $order->get_discount_tax();
+            $discount_net = $cart_discount;
+            
+            if ($prices_include_tax) {
+                $discount_gross = $cart_discount + $discount_tax;
+                $discount_net = ($discount_gross > 0) ? $discount_gross / $tax_rate : 0;
+            }
+
+            $final_details[] = [
                 'comment' => 'Descuento',
-                'net_unit_value' => -$cart_discount
+                'quantity' => 1,
+                'netUnitValue' => -$discount_net, // El descuento debe ser un valor negativo.
+                'taxId' => $bsale_tax_id_array
             ];
-            $total_net_calculated -= $cart_discount;
         }
         
-        $order_total_net = $order->get_total() - $order->get_total_tax();
-        $rounding_difference = $order_total_net - $total_net_calculated;
-
-        if (abs($rounding_difference) > 0.01 && !empty($details)) {
-            foreach ($details as &$detail) {
-                if ($detail['type'] === 'product') {
-                    $detail['net_unit_value'] += $rounding_difference / $detail['quantity'];
-                    break;
-                }
-            }
-            unset($detail);
-        }
-        
-        $final_details = [];
-        foreach ($details as $detail) {
-            if ($detail['type'] === 'product') {
-                $final_details[] = [
-                    'code' => $detail['sku'],
-                    'quantity' => $detail['quantity'],
-                    'netUnitValue' => $detail['net_unit_value'],
-                    'taxId' => $bsale_tax_id_array
-                ];
-            } else {
-                 $final_details[] = [
-                    'comment' => $detail['comment'],
-                    'quantity' => 1,
-                    'netUnitValue' => $detail['net_unit_value'],
-                    'taxId' => $bsale_tax_id_array
-                ];
-            }
-        }
-
         $payload['details'] = $final_details;
 
+        /*
+        // El bloque de pagos debe permanecer comentado para evitar errores de redondeo.
         if ( 'factura' !== $document_type ) {
             $payment_map_key = 'payment_map_' . $order->get_payment_method();
             $bsale_payment_type_id = isset( $this->options[$payment_map_key] ) ? absint( $this->options[$payment_map_key] ) : 0;
@@ -181,10 +176,11 @@ final class BWI_Order_Sync {
                 ]];
             }
         }
+        */
         
         return $payload;
     }
-
+    
     public function trigger_credit_note_creation( $order_id ) {
         if ( empty( $this->options['enable_billing'] ) ) return;
         $order = wc_get_order( $order_id );
