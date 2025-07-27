@@ -56,19 +56,24 @@ final class BWI_Webhooks {
      * @return WP_REST_Response
      */
     public function handle_incoming_webhook( WP_REST_Request $request ) {
-        $logger = wc_get_logger();
-        
+        $options = get_option( 'bwi_options' );
+        $is_logging_enabled = ! empty( $options['enable_logging'] );
+
         // Leer el token desde la ruta de la URL, no desde un parámetro.
         $received_token = $request->get_param('token');
         $secret_token = defined('BWI_WEBHOOK_SECRET') ? BWI_WEBHOOK_SECRET : '';
 
         if ( empty($secret_token) || ! $received_token || ! hash_equals( $secret_token, $received_token ) ) {
-            $logger->error( 'Intento de acceso a Webhook con token de seguridad inválido.', [ 'source' => 'bwi-webhooks' ] );
+            if ($is_logging_enabled) {
+                wc_get_logger()->error( 'Intento de acceso a Webhook con token de seguridad inválido.', [ 'source' => 'bwi-webhooks' ] );
+            }
             return new WP_REST_Response( [ 'status' => 'error', 'message' => 'Token de seguridad inválido.' ], 401 );
         }
 
         $payload = $request->get_json_params();
-        $logger->info( 'Webhook de Bsale recibido y validado: ' . wp_json_encode( $payload ), [ 'source' => 'bwi-webhooks' ] );
+        if ($is_logging_enabled) {
+            wc_get_logger()->info( 'Webhook de Bsale recibido y validado: ' . wp_json_encode( $payload ), [ 'source' => 'bwi-webhooks' ] );
+        }
 
         if ( ! isset( $payload['topic'] ) ) {
             return new WP_REST_Response( [ 'status' => 'error', 'message' => 'Payload inválido.' ], 400 );
@@ -86,26 +91,25 @@ final class BWI_Webhooks {
      * @param array $payload El payload del webhook.
      */
     public function process_webhook_payload( $payload ) {
-        $logger = wc_get_logger();
+        $options = get_option( 'bwi_options' );
+        $is_logging_enabled = ! empty( $options['enable_logging'] );
+        $logger = $is_logging_enabled ? wc_get_logger() : null;
 
         if ( ! isset( $payload['topic'] ) ) {
-            $logger->warning( 'Payload de webhook inválido: no contiene "topic".', [ 'source' => 'bwi-webhooks' ] );
+            if ($is_logging_enabled) $logger->warning( 'Payload de webhook inválido: no contiene "topic".', [ 'source' => 'bwi-webhooks' ] );
             return;
         }
 
         $topic = $payload['topic'];
-        $logger->info( "Procesando webhook para el tópico: '{$topic}'", [ 'source' => 'bwi-webhooks' ] );
+        if ($is_logging_enabled) $logger->info( "Procesando webhook para el tópico: '{$topic}'", [ 'source' => 'bwi-webhooks' ] );
 
         switch ( $topic ) {
-            // --- INICIO DE LA CORRECCIÓN ---
-            // Añadimos el caso para 'stock' que es el que envía Bsale.
             case 'stock':
-            // --- FIN DE LA CORRECCIÓN ---
             case 'stock.update':
             case 'stock.created':
                 BWI_Product_Sync::get_instance()->update_stock_from_webhook( $payload );
                 break;
-            
+
             case 'price':
                 if ( isset($payload['action']) && $payload['action'] === 'put' ) {
                     BWI_Product_Sync::get_instance()->update_price_from_webhook( $payload );
@@ -113,19 +117,16 @@ final class BWI_Webhooks {
                 break;
 
             case 'variant':
-                // Solo nos interesan las actualizaciones (que incluyen la desactivación)
                 if ( isset($payload['action']) && $payload['action'] === 'put' ) {
                     BWI_Product_Sync::get_instance()->handle_variant_update_webhook( $payload );
                 }
                 break;
-                
+
             case 'document.created':
-                // Aquí podríamos añadir lógica para, por ejemplo, actualizar el estado de un pedido.
-                // BWI_Order_Sync::get_instance()->update_order_from_webhook($payload);
                 break;
-            
+
             default:
-                $logger->info( "Webhook recibido para el tópico '{$topic}', pero no hay una acción configurada para él.", [ 'source' => 'bwi-webhooks' ] );
+                if ($is_logging_enabled) $logger->info( "Webhook recibido para el tópico '{$topic}', pero no hay una acción configurada para él.", [ 'source' => 'bwi-webhooks' ] );
                 break;
         }
     }
