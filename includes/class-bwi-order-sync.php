@@ -140,14 +140,22 @@ final class BWI_Order_Sync {
         }
 
         // PROCESAMIENTO DEL ENVÍO
-        $shipping_total_net = (float) $order->get_shipping_total();
-        if ($shipping_total_net > 0) {
+        $shipping_total_con_iva = (float) $order->get_shipping_total();
+        
+        // Solo procesar si hay un costo de envío.
+        if ($shipping_total_con_iva > 0) {
+            // Obtenemos el impuesto calculado por WooCommerce para el envío.
+            $shipping_iva = (float) $order->get_shipping_tax();
+            
+            // Calculamos el valor neto restando el impuesto al total.
+            $shipping_neto = $shipping_total_con_iva - $shipping_iva;
+
             $final_details[] = [
-               'comment' => 'Costo de Envío: ' . $order->get_shipping_method(),
-               'quantity' => 1,
-               'netUnitValue' => $shipping_total_net,
-               'taxId' => $bsale_tax_id_array
-           ];
+            'comment' => 'Costo de Envío: ' . $order->get_shipping_method(),
+            'quantity' => 1,
+            'netUnitValue' => round($shipping_neto, 2), // Enviamos el valor neto redondeado
+            'taxId' => $bsale_tax_id_array
+        ];
         }
 
         $payload['details'] = $final_details;
