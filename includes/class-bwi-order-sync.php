@@ -54,10 +54,8 @@ final class BWI_Order_Sync {
             return;
         }
 
-        // --- INICIO DEL LOGGING DE DIAGNÓSTICO ---
         // Registramos el payload completo que vamos a enviar a Bsale.
         $logger->info( 'Payload a enviar a Bsale para Pedido #' . $order_id . ': ' . wp_json_encode( $payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ), [ 'source' => 'bwi-orders' ] );
-        // --- FIN DEL LOGGING DE DIAGNÓSTICO ---
 
         $api_client = BWI_API_Client::get_instance();
         $response = $api_client->post( 'documents.json', $payload );
@@ -66,12 +64,10 @@ final class BWI_Order_Sync {
             $error_message = $response->get_error_message();
             $order->add_order_note( '<strong>Error al crear documento en Bsale:</strong> ' . $error_message );
             
-            // --- INICIO DEL LOGGING DE DIAGNÓSTICO ---
+  
             // Registramos el error exacto que Bsale nos devuelve.
             $logger->error( 'Error recibido de la API de Bsale para Pedido #' . $order_id . ': ' . $error_message, [ 'source' => 'bwi-orders' ] );
             $logger->error( 'Datos completos del error: ' . wp_json_encode( $response->get_error_data(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ), [ 'source' => 'bwi-orders' ] );
-            // --- FIN DEL LOGGING DE DIAGNÓSTICO ---
-
         } else if ( isset( $response->id ) && isset( $response->urlPdf ) ) {
             $order->update_meta_data( '_bwi_document_id', $response->id );
             $order->update_meta_data( '_bwi_document_number', $response->number );
@@ -86,81 +82,10 @@ final class BWI_Order_Sync {
         }
     }
 
-    /*
-    public function process_document_creation( $order_id ) {
-        $order = wc_get_order( $order_id );
-        if ( ! $order ) return;
-        
-        $this->options = get_option( 'bwi_options' );
-        $is_logging_enabled = ! empty( $this->options['enable_logging'] );
-        $logger = $is_logging_enabled ? wc_get_logger() : null;
-
-        $payload = $this->build_bsale_payload( $order );
-        if ( is_wp_error( $payload ) ) {
-            $order->add_order_note( 'Error al construir payload para Bsale: ' . $payload->get_error_message() );
-            if ($is_logging_enabled) $logger->error( 'Error al construir payload para Pedido #' . $order_id . ': ' . $payload->get_error_message(), [ 'source' => 'bwi-orders' ] );
-            return;
-        }
-
-        if ($is_logging_enabled) $logger->info( 'Payload a enviar a Bsale para Pedido #' . $order_id . ': ' . wp_json_encode( $payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ), [ 'source' => 'bwi-orders' ] );
-
-        $api_client = BWI_API_Client::get_instance();
-        $response = $api_client->post( 'documents.json', $payload );
-
-        if ( is_wp_error( $response ) ) {
-            $error_message = $response->get_error_message();
-            $order->add_order_note( '<strong>Error al crear documento en Bsale:</strong> ' . $error_message );
-            if ($is_logging_enabled) {
-                $logger->error( 'Error recibido de la API de Bsale para Pedido #' . $order_id . ': ' . $error_message, [ 'source' => 'bwi-orders' ] );
-                $logger->error( 'Datos completos del error: ' . wp_json_encode( $response->get_error_data(), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ), [ 'source' => 'bwi-orders' ] );
-            }
-        } else if ( isset( $response->id ) && isset( $response->urlPdf ) ) {
-            $order->update_meta_data( '_bwi_document_id', $response->id );
-            $order->update_meta_data( '_bwi_document_number', $response->number );
-            $order->update_meta_data( '_bwi_document_url', $response->urlPdf );
-            $note = sprintf( 'Documento creado exitosamente en Bsale. Folio: %s. <a href="%s" target="_blank">Ver PDF</a>', esc_html( $response->number ), esc_url( $response->urlPdf ) );
-            $order->add_order_note( $note );
-            $order->save();
-            do_action( 'bwi_send_document_email_notification', $order_id );
-        } else {
-             $order->add_order_note( '<strong>Respuesta inesperada de la API de Bsale al crear documento.</strong>' );
-             if ($is_logging_enabled) $logger->warning( 'Respuesta inesperada de la API para Pedido #' . $order_id . ': ' . wp_json_encode( $response, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ), [ 'source' => 'bwi-orders' ] );
-        }
-    }
-        */
-
       /**
      * Construye el payload para la API de Bsale a partir de una orden de WooCommerce.
-     * Esta versión final está optimizada para:
-     * 1. Respetar la configuración de precios con IVA incluido de WooCommerce.
-     * 2. Distribuir correctamente los descuentos como un porcentaje por línea.
-     * 3. Especificar explícitamente el impuesto (IVA 19%) por su código tributario en cada línea.
-     * 4. Simular el cálculo de Bsale para obtener un total de pago exacto y evitar errores de redondeo.
-     * 5. Enviar el pago solo para Boletas, dejando las Facturas con saldo pendiente.
-     *
      * @param WC_Order $order El objeto del pedido de WooCommerce.
      * @return array|WP_Error El payload listo para enviar a Bsale o un objeto WP_Error si falta un SKU.
-     */
-    /**
-     * Construye el payload para la API de Bsale a partir de una orden de WooCommerce.
-     * VERSIÓN FINAL Y DEPURADA v3.
-     *
-     * @param WC_Order $order El objeto del pedido de WooCommerce.
-     * @return array|WP_Error El payload listo para enviar a Bsale o un objeto WP_Error.
-     */
-    /**
-     * Construye el payload para la API de Bsale a partir de una orden de WooCommerce.
-     * VERSIÓN FINAL Y DEPURADA.
-     *
-     * @param WC_Order $order El objeto del pedido de WooCommerce.
-     * @return array|WP_Error El payload listo para enviar a Bsale o un objeto WP_Error.
-     */
-    /**
-     * Construye el payload para la API de Bsale a partir de una orden de WooCommerce.
-     * VERSIÓN FINAL Y DEPURADA.
-     *
-     * @param WC_Order $order El objeto del pedido de WooCommerce.
-     * @return array|WP_Error El payload listo para enviar a Bsale o un objeto WP_Error.
      */
     private function build_bsale_payload( $order ) {
         $document_type = $order->get_meta( '_bwi_document_type' );
@@ -172,7 +97,7 @@ final class BWI_Order_Sync {
             'declareSii' => 1 // Se añade para asegurar la declaración al SII
         ];
 
-        // 1. CONFIGURACIÓN DEL CLIENTE Y TIPO DE DOCUMENTO
+        // CONFIGURACIÓN DEL CLIENTE Y TIPO DE DOCUMENTO
         if ('factura' === $document_type) {
             $payload['codeSii'] = !empty($this->options['factura_codesii']) ? absint($this->options['factura_codesii']) : 33;
             $payload['client'] = ['code' => $order->get_meta('_bwi_billing_rut'),'company' => $order->get_meta('_bwi_billing_company_name'),'activity' => $order->get_meta('_bwi_billing_activity'),'address' => $order->get_meta('_bwi_fiscal_address'),'municipality' => $order->get_meta('_bwi_fiscal_municipality'),'city' => $order->get_meta('_bwi_fiscal_city'),'email' => $order->get_billing_email(),'phone' => $order->get_billing_phone(),'companyOrPerson' => 1];
@@ -184,9 +109,9 @@ final class BWI_Order_Sync {
         }
 
         $final_details = [];
-        $bsale_tax_id_array = '[1]'; // ID del IVA en Bsale es 1, como confirmó el log.
+        $bsale_tax_id_array = '[1]'; // ID del IVA en Bsale
 
-        // 2. PROCESAMIENTO DE LÍNEAS DE PRODUCTO
+        // PROCESAMIENTO DE LÍNEAS DE PRODUCTO
         foreach ($order->get_items() as $item) {
             $product = $item->get_product();
             $sku = $product ? $product->get_sku() : '';
@@ -214,7 +139,7 @@ final class BWI_Order_Sync {
             ];
         }
 
-        // 3. PROCESAMIENTO DEL ENVÍO
+        // PROCESAMIENTO DEL ENVÍO
         $shipping_total_net = (float) $order->get_shipping_total();
         if ($shipping_total_net > 0) {
             $final_details[] = [
@@ -227,9 +152,6 @@ final class BWI_Order_Sync {
 
         $payload['details'] = $final_details;
 
-        // 4. [SOLUCIÓN DEFINITIVA] SE ELIMINA POR COMPLETO EL NODO 'payments'.
-        // Bsale se encargará de crear el documento y registrar el pago por el monto que él mismo calcule.
-        // Esto elimina cualquier posible error de redondeo.
         
         return $payload;
     }
@@ -246,6 +168,10 @@ final class BWI_Order_Sync {
     public function process_credit_note_creation( $order_id ) {
         $order = wc_get_order( $order_id );
         if ( ! $order ) return;
+        // Cargamos las opciones y verificamos si el logging está activo al principio.
+        $this->options = get_option( 'bwi_options' );
+        $is_logging_enabled = ! empty( $this->options['enable_logging'] );
+        $logger = $is_logging_enabled ? wc_get_logger() : null;
         $bsale_document_id = $order->get_meta( '_bwi_document_id' );
         if ( ! $bsale_document_id ) {
             $order->add_order_note( '<strong>Error:</strong> No se puede crear Nota de Crédito. No se encontró ID de documento Bsale original.' );
@@ -289,17 +215,30 @@ final class BWI_Order_Sync {
             'client' => $client_data,
             'details' => $return_details,
         ];
+        // Se registra el payload en el log solo si la depuración está activa.
+        if ( $is_logging_enabled ) {
+            $logger->info( 'Payload a enviar para Nota de Crédito (Devolución) Pedido #' . $order_id . ': ' . wp_json_encode( $payload, JSON_PRETTY_PRINT ), [ 'source' => 'bwi-orders' ] );
+        }
+        
         $response = $api_client->post( 'returns.json', $payload );
         if ( is_wp_error( $response ) ) {
+            // La nota de error siempre se añade al pedido.
             $order->add_order_note( '<strong>Error al crear Nota de Crédito en Bsale:</strong> ' . $response->get_error_message() );
+            
+            // El log técnico detallado solo se escribe si la depuración está activa.
+            if ( $is_logging_enabled ) {
+                $logger->error( 'Error detallado al crear NC para Pedido #' . $order_id . ': ' . wp_json_encode( $response->get_error_data(), JSON_PRETTY_PRINT ), [ 'source' => 'bwi-orders' ] );
+            }
         } else if ( isset( $response->id ) && isset($response->credit_note->urlPdf) ) {
+            // La nota de éxito siempre se añade al pedido.
             $order->update_meta_data( '_bwi_return_id', $response->id );
             $order->update_meta_data( '_bwi_credit_note_url', $response->credit_note->urlPdf );
             $note = sprintf( 'Nota de Crédito creada exitosamente en Bsale. Folio: %s. <a href="%s" target="_blank">Ver PDF</a>', esc_html( $response->credit_note->number ), esc_url( $response->credit_note->urlPdf ) );
             $order->add_order_note( $note );
             $order->save();
         } else {
-             $order->add_order_note( '<strong>Respuesta inesperada de Bsale al crear la Nota de Crédito.</strong> Respuesta: ' . wp_json_encode($response) );
+            // La nota de advertencia siempre se añade al pedido.
+            $order->add_order_note( '<strong>Respuesta inesperada de Bsale al crear la Nota de Crédito.</strong> Respuesta: ' . wp_json_encode($response) );
         }
     }
 }

@@ -12,8 +12,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 /**
- * Cliente para la comunicación con la API de Bsale.
- *
  * Esta clase sigue el patrón Singleton para asegurar una única instancia y maneja
  * todas las solicitudes HTTP (GET, POST, etc.) hacia la API de Bsale,
  * incluyendo la autenticación y el manejo de errores.
@@ -76,7 +74,7 @@ final class BWI_API_Client {
             return new WP_Error( 'bwi_api_error', 'El Access Token de Bsale no está configurado en wp-config.php.' );
         }
         $request_url = '';
-        // Revisa si el endpoint es una ruta completa que ya incluye una versión (ej. /v2/...)
+        // Revisa si el endpoint es una ruta completa que ya incluye una versión 
         if ( preg_match('/^\/v[0-9]+\//', $endpoint) ) {
             // Si es así, usa el dominio base y la ruta completa del webhook.
             $request_url = 'https://api.bsale.io' . $endpoint;
@@ -139,12 +137,10 @@ final class BWI_API_Client {
      * @return mixed|WP_Error
      */
     public function get_stock( $params = [] ) {
-        // Importante: El endpoint de stock es v2 según la documentación actualizada.
         $endpoint = 'stocks.json';
         if ( ! empty( $params ) ) {
             $endpoint .= '?' . http_build_query( $params );
         }
-        // Temporalmente usamos el v1, ya que v2 no está en la URL base. Ajustar si es necesario.
         return $this->request( 'GET', $endpoint );
     }
     

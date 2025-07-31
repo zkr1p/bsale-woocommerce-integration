@@ -60,10 +60,6 @@ final class BWI_Admin {
             [ $this, 'create_settings_page' ]   // Función que renderiza la página
         );
     }
-
-    /**
-     * Crea el contenido HTML de la página de ajustes.
-     */
     /**
      * Crea el contenido HTML de la página de ajustes con pestañas.
      */
@@ -152,9 +148,7 @@ final class BWI_Admin {
         // --- SECCIÓN: Sincronización de Productos ---
         add_settings_section( 'bwi_sync_settings_section', 'Sincronización de Productos', null, 'bwi_settings' );
         add_settings_field( 'bwi_office_id_stock', 'Sucursal para Stock', [ $this, 'render_office_id_stock_field' ], 'bwi_settings', 'bwi_sync_settings_section' );
-        // NUEVO CAMPO: Lista de Precios
         add_settings_field( 'bwi_price_list_id', 'Lista de Precios', [ $this, 'render_price_list_id_field' ], 'bwi_settings', 'bwi_sync_settings_section' );
-        // NUEVO CAMPO: Tipo de Producto a Sincronizar
         add_settings_field( 'bwi_product_type_id_sync', 'Sincronizar solo el Tipo de Producto', [ $this, 'render_product_type_id_sync_field' ], 'bwi_settings', 'bwi_sync_settings_section' );
         
         // --- SECCIÓN: Facturación ---
@@ -163,7 +157,6 @@ final class BWI_Admin {
         add_settings_field( 'bwi_trigger_status', 'Estado para Generar Documento', [ $this, 'render_trigger_status_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
         add_settings_field( 'bwi_boleta_codesii', 'Código SII para Boletas', [ $this, 'render_boleta_codesii_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
         add_settings_field( 'bwi_factura_codesii', 'Código SII para Facturas', [ $this, 'render_factura_codesii_field' ], 'bwi_settings', 'bwi_billing_settings_section' );
-        // NUEVO CAMPO: Nota de Crédito
         add_settings_field(
             'bwi_credit_note_doc_type_id',
             'Tipo de Documento para Notas de Crédito',
@@ -188,7 +181,7 @@ final class BWI_Admin {
         foreach ( $payment_gateways as $gateway ) {
             add_settings_field(
                 'bwi_payment_map_' . $gateway->id, // ID único para cada campo
-                $gateway->get_title(), // Nombre de la pasarela (ej. "Transferencia Bancaria")
+                $gateway->get_title(), // Nombre de la pasarela 
                 [ $this, 'render_payment_gateway_mapping_field' ],
                 'bwi_settings',
                 'bwi_payment_mapping_section',
@@ -277,8 +270,6 @@ final class BWI_Admin {
             foreach ( $offices as $office ) {
                 // Añadimos una etiqueta "(Inactiva)" a las sucursales que no están activas para mayor claridad.
                 $status_label = (isset($office->state) && $office->state != 0) ? ' (Inactiva)' : '';
-                
-                // --- LÍNEA CORREGIDA ---
                 printf(
                     '<option value="%d" %s>%s%s</option>',
                     esc_attr($office->id),
@@ -309,7 +300,7 @@ final class BWI_Admin {
         if ( !empty($price_lists) ) {
             echo '<option value="">-- No sincronizar precios --</option>';
             foreach ( $price_lists as $list ) {
-                // CORRECIÓN: Verificamos que el objeto coin y symbol existan antes de usarlos.
+                // Verificamos que el objeto coin y symbol existan antes de usarlos.
                 $currency_symbol = isset($list->coin, $list->coin->symbol) ? ' (' . esc_html($list->coin->symbol) . ')' : '';
                 
                 printf(
@@ -338,7 +329,6 @@ final class BWI_Admin {
         
         echo '<select name="bwi_options[trigger_status]">';
         foreach ( $wc_statuses as $status_key => $status_name ) {
-            // wc_get_order_statuses() devuelve las claves con el prefijo "wc-", lo quitamos para guardar.
             $status_key_clean = str_replace( 'wc-', '', $status_key );
             echo '<option value="' . esc_attr( $status_key_clean ) . '" ' . selected( $current_status, $status_key_clean, false ) . '>' . esc_html( $status_name ) . '</option>';
         }
@@ -456,7 +446,7 @@ final class BWI_Admin {
     }
 
     /**
-     * Muestra la casilla para activar/desactivar el modo de depuración (logging).
+     * Muestra la casilla para activar/desactivar el modo de depuración.
      */
     public function render_enable_logging_field() {
         $options = get_option( 'bwi_options' );
@@ -480,7 +470,7 @@ final class BWI_Admin {
 
         if ( !empty($document_types) ) {
             foreach ( $document_types as $doc_type ) {
-                // Buscamos específicamente documentos que sean Nota de Crédito (código 61)
+                // Buscamos específicamente documentos que sean Nota de Crédito 
                 if (isset($doc_type->codeSii) && $doc_type->codeSii == '61') {
                     printf(
                         '<option value="%d" %s>%s</option>',
@@ -499,7 +489,6 @@ final class BWI_Admin {
     
     public function sanitize_options( $input ) {
         $new_input = [];
-        // Las credenciales ya no se guardan aquí.
         if ( isset( $input['office_id_stock'] ) ) $new_input['office_id_stock'] = absint( $input['office_id_stock'] );
         if ( isset( $input['price_list_id'] ) ) $new_input['price_list_id'] = absint( $input['price_list_id'] );
         if ( isset( $input['enable_billing'] ) ) $new_input['enable_billing'] = absint( $input['enable_billing'] );
@@ -510,7 +499,7 @@ final class BWI_Admin {
         if ( isset( $input['enable_logging'] ) ) $new_input['enable_logging'] = absint( $input['enable_logging'] );
         if ( isset( $input['product_type_id_sync'] ) ) $new_input['product_type_id_sync'] = absint( $input['product_type_id_sync'] );
         if ( isset( $input['credit_note_doc_type_id'] ) ) $new_input['credit_note_doc_type_id'] = absint( $input['credit_note_doc_type_id'] );
-        // Recorrer todas las posibles claves de mapeo y guardarlas si existen.
+        // Recorre todas las posibles claves de mapeo y guarda si existen.
         foreach ( $input as $key => $value ) {
             if ( strpos( $key, 'payment_map_' ) === 0 ) {
                 $new_input[$key] = sanitize_text_field( $value );
@@ -524,7 +513,7 @@ final class BWI_Admin {
      * Función de ayuda para obtener datos desde la API de Bsale con caché (transient).
      * Centraliza la lógica de obtener y cachear listas para evitar código repetido.
      *
-     * @param string $endpoint      La ruta de la API (ej. 'offices.json').
+     * @param string $endpoint      La ruta de la API.
      * @param string $transient_key El nombre único para la caché de esta lista.
      * @param array  $params        Parámetros adicionales para la solicitud a la API.
      * @return array                Una lista de items obtenidos de la API, o un array vacío si falla.
@@ -603,13 +592,12 @@ final class BWI_Admin {
         if ( 'settings_page_bwi_settings' !== $hook ) {
             return;
         }
-
-        // Crear un nuevo archivo js/bwi-admin.js y pegar el código JS allí
+        
         wp_enqueue_script(
             'bwi-admin-script',
             BWI_PLUGIN_URL . 'assets/js/bwi-admin.js', 
             [ 'jquery' ],
-            '2.7.0', // Buena práctica: incrementa la versión
+            '2.7.0', // incrementar la versión por actualización
             true // cargar en el footer
         );
 

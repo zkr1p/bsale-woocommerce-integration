@@ -58,7 +58,7 @@ final class BWI_Checkout {
      */
     public function add_custom_checkout_fields( $checkout ) {
         echo '<div id="bwi-billing-options-wrapper"><h3>' . esc_html__( 'Documento Tributario', 'bsale-woocommerce-integration' ) . '</h3>';
-        // MEJORA UX/UI: Usamos un campo 'select' en lugar de 'radio'
+        // Usamos un campo 'select'
         woocommerce_form_field( 'bwi_document_type', [
             'type'    => 'select',
             'class'   => [ 'form-row-wide' ],
@@ -134,14 +134,11 @@ final class BWI_Checkout {
     public function validate_custom_fields() {
         if ( isset($_POST['bwi_document_type']) && 'factura' === $_POST['bwi_document_type'] ) {
             if ( empty( $_POST['bwi_billing_company_name'] ) ) wc_add_notice( 'La <strong>Razón Social</strong> es un campo requerido para la factura.', 'error' );
-
-            // --- INICIO DE LA MODIFICACIÓN ---
             if ( empty( $_POST['bwi_billing_rut'] ) ) {
                 wc_add_notice( 'El <strong>RUT</strong> es un campo requerido para la factura.', 'error' );
             } elseif ( ! $this->is_valid_rut( $_POST['bwi_billing_rut'] ) ) {
                 wc_add_notice( 'Por favor, introduce un <strong>RUT</strong> válido (ej: 76.123.456-7).', 'error' );
             }
-            // --- FIN DE LA MODIFICACIÓN ---
 
             if ( empty( $_POST['bwi_billing_activity'] ) ) wc_add_notice( 'El <strong>Giro</strong> es un campo requerido para la factura.', 'error' );
             if ( empty( $_POST['bwi_fiscal_address'] ) ) wc_add_notice( 'La <strong>Dirección Fiscal</strong> es un campo requerido para la factura.', 'error' );

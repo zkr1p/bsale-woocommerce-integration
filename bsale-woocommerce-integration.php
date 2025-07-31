@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name:         Integración Bsale y WooCommerce - LOV
+ * Plugin Name:         Integración Bsale y WooCommerce - Dot
  * Plugin URI:          https://whydot.co
  * Description:         Sincroniza productos, stock, pedidos y facturación entre Bsale y WooCommerce basado en la documentación actualizada de la API de Bsale.
- * Version:             3.0.5
+ * Version:             3.1.0
  * Author:              WHYDOTCO
  * Author URI:          https://whydot.co
  * License:             GPLv2 or later
@@ -41,7 +41,54 @@ function bwi_activate_plugin() {
     if ( ! wp_next_scheduled( 'bwi_cron_sync_products' ) ) {
         wp_schedule_event( time(), 'hourly', 'bwi_cron_sync_products' );
     }
+
+    // Configurar las opciones de WooCommerce para impuestos y moneda.
+    // Esto asegura que la tienda esté lista para operar con IVA incluido desde el inicio.
+    update_option('woocommerce_calc_taxes', 'yes'); // Activar tasas de impuestos y sus cálculos
+    update_option('woocommerce_price_num_decimals', '2'); // Número de decimales en 2
+    update_option('woocommerce_prices_include_tax', 'yes'); // Introducir precios con impuestos incluidos
+    update_option('woocommerce_tax_based_on', 'shipping'); // Calcular impuesto basado en la dirección de envío del cliente
+    update_option('woocommerce_shipping_tax_class', ''); // Asignar la clase de impuesto estándar al envío. Vacío significa 'estándar'.
+    update_option('woocommerce_tax_display_shop', 'incl'); // Mostrar precios en la tienda con impuestos incluidos
+    update_option('woocommerce_tax_display_cart', 'incl'); // Mostrar precios en carrito/pago con impuestos incluidos
+    update_option('woocommerce_price_display_suffix', ' IVA incluido'); // Sufijo a mostrar en el precio. Espacio inicial para separación.
+    update_option('woocommerce_tax_total_display', 'single'); // Visualización del total de impuestos como un total único
+
+    // Crear la tasa de impuesto estándar si no existe.
+    // Se llama a una función separada para mantener el código limpio.
+    bwi_install_standard_tax_rate();
 }
+
+/**
+ * Crea la tasa de impuesto estándar del 19% para Chile.
+ * Verifica si ya existe una tasa similar para no crear duplicados.
+ */
+function bwi_install_standard_tax_rate() {
+    // Asegurarse de que WooCommerce está activo y sus funciones disponibles.
+    if ( ! function_exists( 'WC' ) ) {
+        return;
+    }
+
+    $tax_rate = [
+        'tax_rate_country'  => '', // Aplicar a todos los países
+        'tax_rate_state'    => '', // Aplicar a todos los estados/regiones
+        'tax_rate'          => '19.0000', // Tasa del 19%
+        'tax_rate_name'     => 'IVA', // Nombre del impuesto
+        'tax_rate_priority' => 1,
+        'tax_rate_compound' => 0, // No es un impuesto compuesto
+        'tax_rate_shipping' => 1, // Aplicar esta tasa al envío
+        'tax_rate_class'    => 'standard', // Clase de impuesto estándar
+    ];
+
+    // Verificar si ya existe una tasa con estas características para no duplicarla
+    $existing_rates = WC_Tax::find_rates($tax_rate);
+
+    if ( empty( $existing_rates ) ) {
+        // Si no existe, se crea la tasa.
+        WC_Tax::create_rate( $tax_rate );
+    }
+}
+
 /**
  * Función que se ejecuta UNA VEZ cuando el plugin se desactiva.
  */
@@ -66,7 +113,6 @@ final class Bsale_WooCommerce_Integration {
      * Es privado para asegurar que solo exista una instancia (patrón Singleton).
      */
     private function __construct() {
-        // MEJORA CRÍTICA: No cargar nada aquí. Solo enganchar la inicialización al hook correcto.
         add_action( 'plugins_loaded', [ $this, 'init_plugin' ] );
     }
 
@@ -84,20 +130,18 @@ final class Bsale_WooCommerce_Integration {
      * Inicializa el plugin. Se ejecuta solo cuando todos los plugins están cargados.
      */
     public function init_plugin() {
-        // 1. Verificar si WooCommerce está activo.
+        //Verificar si WooCommerce está activo.
         if ( ! class_exists( 'WooCommerce' ) ) {
             add_action( 'admin_notices', [ $this, 'notice_woocommerce_not_active' ] );
             return;
         }
 
-        // --- INICIO DE LA MODIFICACIÓN ---
         $this->load_textdomain();
-        // --- FIN DE LA MODIFICACIÓN ---
 
-        // 2. Ahora que sabemos que WC está activo, cargamos nuestras dependencias.
+        // Ahora que sabemos que WC está activo, cargamos nuestras dependencias.
         $this->load_dependencies();
 
-        // 3. Inicializamos nuestras clases.
+        // Inicializamos nuestras clases.
         $this->init_classes();
     }
 
@@ -176,7 +220,7 @@ final class Bsale_WooCommerce_Integration {
     }
 
     /**
-     * Añade nuestro correo personalizado a la lista de correos de WooCommerce.
+     * Añade el correo personalizado a la lista de correos de WooCommerce.
      * Carga el archivo de la clase justo en el momento necesario para evitar errores de carga.
      *
      * @param array $email_classes Las clases de correo existentes.
@@ -198,5 +242,5 @@ function bwi_run_plugin() {
     return Bsale_WooCommerce_Integration::get_instance();
 }
 
-// ¡Iniciamos el plugin!
+// Iniciamos el plugin
 bwi_run_plugin();

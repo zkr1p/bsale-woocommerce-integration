@@ -420,6 +420,14 @@ final class BWI_Product_Sync {
             return;
         }
 
+        // Al recibir un webhook de cambio de precio, forzamos la limpieza de la caché.
+        // Esto asegura que la próxima sincronización masiva use los precios más recientes.
+        $transient_key = 'bwi_price_list_cache_' . $price_list_id_webhook;
+        delete_transient( $transient_key );
+        if ( $this->is_logging_enabled() ) {
+            wc_get_logger()->info( "¡Webhook de precio recibido! Se ha limpiado la caché para la lista de precios ID [{$price_list_id_webhook}] para forzar su actualización.", [ 'source' => 'bwi-webhooks' ] );
+        }
+
         $variant_details = $this->api_client->get("variants/{$variant_id_webhook}.json", ['expand' => '[product]']);
         if ( is_wp_error( $variant_details ) || empty( $variant_details->code ) ) {
             if ( $this->is_logging_enabled() ) {
