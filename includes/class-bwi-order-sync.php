@@ -100,12 +100,17 @@ final class BWI_Order_Sync {
         // CONFIGURACIÓN DEL CLIENTE Y TIPO DE DOCUMENTO
         if ('factura' === $document_type) {
             $payload['codeSii'] = !empty($this->options['factura_codesii']) ? absint($this->options['factura_codesii']) : 33;
-            $payload['client'] = ['code' => $order->get_meta('_bwi_billing_rut'),'company' => $order->get_meta('_bwi_billing_company_name'),'activity' => $order->get_meta('_bwi_billing_activity'),'address' => $order->get_meta('_bwi_fiscal_address'),'municipality' => $order->get_meta('_bwi_fiscal_municipality'),'city' => $order->get_meta('_bwi_fiscal_city'),'email' => $order->get_billing_email(),'phone' => $order->get_billing_phone(),'companyOrPerson' => 1];
+            $payload['client'] = [
+                'code' => $order->get_meta('_bwi_billing_rut'),
+                'company' => $order->get_meta('_bwi_billing_company_name'),
+                'activity' => $order->get_meta('_bwi_billing_activity'),
+                'address' => $order->get_meta('_bwi_fiscal_address'),
+                'municipality' => $order->get_meta('_bwi_fiscal_municipality'),
+                'city' => $order->get_meta('_bwi_fiscal_city'),'email' => $order->get_billing_email(),
+                'phone' => $order->get_billing_phone(),
+                'companyOrPerson' => 1];
         } else {
             $payload['codeSii'] = !empty($this->options['boleta_codesii']) ? absint($this->options['boleta_codesii']) : 39;
-            $first_name = trim($order->get_billing_first_name()); $last_name = trim($order->get_billing_last_name());
-            if (empty($first_name) && empty($last_name)) { $first_name = 'Cliente'; $last_name = 'Tienda'; }
-            $payload['client'] = ['code' => '1-9','firstName' => $first_name,'lastName' => $last_name,'email' => $order->get_billing_email(),'companyOrPerson' => 0];
         }
 
         $final_details = [];
@@ -139,22 +144,15 @@ final class BWI_Order_Sync {
             ];
         }
 
-        // PROCESAMIENTO DEL ENVÍO
-        $shipping_total_con_iva = (float) $order->get_shipping_total();
         
-        // Solo procesar si hay un costo de envío.
-        if ($shipping_total_con_iva > 0) {
-            // Obtenemos el impuesto calculado por WooCommerce para el envío.
-            $shipping_iva = (float) $order->get_shipping_tax();
-            
-            // Calculamos el valor neto restando el impuesto al total.
-            $shipping_neto = $shipping_total_con_iva - $shipping_iva;
+        $shipping_total = (float) $order->get_shipping_total();
 
+        if ($shipping_total > 0) {
             $final_details[] = [
-            'comment' => 'Costo de Envío: ' . $order->get_shipping_method(),
-            'quantity' => 1,
-            'netUnitValue' => round($shipping_neto, 2), // Enviamos el valor neto redondeado
-            'taxId' => $bsale_tax_id_array
+            'comment'      => 'Costo de Envío: ' . $order->get_shipping_method(),
+            'quantity'     => 1,
+            'netUnitValue' => round($shipping_total, 2), // Se envía el costo total, no el neto.
+            'taxId'        => $bsale_tax_id_array
         ];
         }
 

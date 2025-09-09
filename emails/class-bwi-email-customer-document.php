@@ -142,7 +142,7 @@ if ( ! class_exists( 'BWI_Email_Customer_Document' ) ) :
          * @return string
          */
         public function get_default_subject() {
-            return __( 'Tu documento tributario para el pedido #{order_number} está listo', 'bsale-woocommerce-integration' );
+            return __( '¡Hemos recibido tu pedido en Ovejavasca!', 'bsale-woocommerce-integration' );
         }
 
         /**
@@ -151,7 +151,7 @@ if ( ! class_exists( 'BWI_Email_Customer_Document' ) ) :
          * @return string
          */
         public function get_default_heading() {
-            return __( 'Tu Documento Tributario', 'bsale-woocommerce-integration' );
+            return __( 'Gracias por tu pedido', 'bsale-woocommerce-integration' );
         }
     }
 

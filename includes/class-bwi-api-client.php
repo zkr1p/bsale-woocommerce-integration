@@ -73,38 +73,65 @@ final class BWI_API_Client {
         if ( empty( $this->access_token ) ) {
             return new WP_Error( 'bwi_api_error', 'El Access Token de Bsale no está configurado en wp-config.php.' );
         }
+
         $request_url = '';
-        // Revisa si el endpoint es una ruta completa que ya incluye una versión 
         if ( preg_match('/^\/v[0-9]+\//', $endpoint) ) {
-            // Si es así, usa el dominio base y la ruta completa del webhook.
             $request_url = 'https://api.bsale.io' . $endpoint;
         } else {
-            // Si no, es una ruta relativa y usamos la URL base v1 por defecto.
             $request_url = $this->api_url . ltrim($endpoint, '/');
         }
+
         $args = [
             'method'  => strtoupper($method),
             'headers' => [
                 'Content-Type' => 'application/json',
                 'access_token' => $this->access_token,
             ],
-            'timeout' => 30,
+            'timeout' => 60, // timeout a 60 segundos
         ];
+
         if ( ! empty( $body ) ) {
             $args['body'] = wp_json_encode( $body );
         }
-        $response = wp_remote_request( $request_url, $args );
-        if ( is_wp_error( $response ) ) return $response;
-        $response_code = wp_remote_retrieve_response_code( $response );
+
+        // --- Lógica de reintentos ---
+        $max_retries = 3;
+        $retry_delay = 5; // segundos
+        for ( $attempt = 1; $attempt <= $max_retries; $attempt++ ) {
+            $response = wp_remote_request( $request_url, $args );
+
+            if ( is_wp_error( $response ) ) {
+                if ( $attempt < $max_retries ) {
+                    sleep( $retry_delay );
+                    continue;
+                }
+                return $response;
+            }
+
+            $response_code = wp_remote_retrieve_response_code( $response );
+            
+            if ( $response_code >= 200 && $response_code < 300 ) {
+                break;
+            }
+
+            if ( $response_code >= 500 && $attempt < $max_retries ) {
+                sleep( $retry_delay );
+                continue;
+            }
+            
+            break;
+        }
+
         $response_body = wp_remote_retrieve_body( $response );
         $decoded_body  = json_decode( $response_body );
+
         if ( $response_code >= 400 ) {
             $error_message = isset($decoded_body->error) ? $decoded_body->error : 'Error desconocido';
             return new WP_Error( 'bwi_api_error', "Error {$response_code}: {$error_message}", [ 'status' => $response_code ] );
         }
+
         return $decoded_body;
     }
-
     
      /**
      * Realiza una solicitud GET a un endpoint de la API.

@@ -1,9 +1,9 @@
 <?php
 /**
  * Plugin Name:         Integración Bsale y WooCommerce 
- * Plugin URI:          https://whydot.co
+ * Plugin URI:          https://whydotco.com
  * Description:         Sincroniza productos, stock, pedidos y facturación entre Bsale y WooCommerce.
- * Version:             3.1.9
+ * Version:             3.2.5
  * Author:              WHYDOTCO
  * Author URI:          https://whydot.co
  * License:             GPLv2 or later
